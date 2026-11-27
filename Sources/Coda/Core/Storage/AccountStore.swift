@@ -119,7 +119,10 @@ final class AccountStore: ObservableObject {
         qqRenewalTask?.cancel()
         qqRenewalTask = nil
         provider = value
-        sessionRevision = UUID()
+        // Deliberately NOT a new sessionRevision: that token resets every
+        // navigation stack, and a queue that flips platform per song must
+        // not keep kicking the listener back to the tab roots. The library
+        // still refreshes — bootstrap bumps libraryRevision when it lands.
         pendingPlatformLikes = [:]
         profileBinding = nil
         profile = nil

@@ -102,7 +102,9 @@ struct AggregatePlaylistDetailView: View {
     let playlistID: UUID
 
     @ObservedObject private var store = AggregatePlaylistStore.shared
-    @EnvironmentObject private var player: PlayerService
+    // The shared player, not an environment object: the page must not
+    // re-render on every player publish while the list is scrolling.
+    private let player = PlayerService.shared
     @Environment(\.dismiss) private var dismiss
     @State private var filter = ""
     @State private var searchFocused = false
