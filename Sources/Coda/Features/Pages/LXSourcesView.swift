@@ -9,6 +9,7 @@ struct LXSourcesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showFileImporter = false
+    @State private var showFilePicker = false
     @State private var showURLImport = false
     @State private var importURLText = ""
     @State private var importError: String?
@@ -44,7 +45,11 @@ struct LXSourcesView: View {
 
                 Section("导入音源") {
                     Button {
+                        #if os(iOS)
+                        showFilePicker = true
+                        #else
                         showFileImporter = true
+                        #endif
                     } label: {
                         Label("从文件导入", systemImage: "doc.badge.plus")
                     }
@@ -53,6 +58,15 @@ struct LXSourcesView: View {
                         showURLImport = true
                     } label: {
                         Label("从链接导入", systemImage: "link.badge.plus")
+                    }
+                    Button {
+                        if let text = Platform.pasteboardString, !text.isEmpty {
+                            importText(text)
+                        } else {
+                            importError = "剪贴板是空的，先复制音源脚本内容再来"
+                        }
+                    } label: {
+                        Label("从剪贴板导入", systemImage: "doc.on.clipboard")
                     }
                     if isImporting { ProgressView("正在导入…") }
                 }
@@ -75,9 +89,19 @@ struct LXSourcesView: View {
             .fileImporter(isPresented: $showFileImporter,
                           allowedContentTypes: [.javaScript, .plainText, .text, .data],
                           allowsMultipleSelection: false) { result in
-                guard case .success(let urls) = result, let url = urls.first else { return }
-                Task { await importFromFile(url) }
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { Task { await importFromFile(url) } }
+                case .failure(let error):
+                    importError = error.localizedDescription
+                }
             }
+            #if os(iOS)
+            .sheet(isPresented: $showFilePicker) {
+                LXDocumentPicker { url in Task { await importFromFile(url) } }
+                    .ignoresSafeArea()
+            }
+            #endif
             .alert("从链接导入", isPresented: $showURLImport) {
                 TextField("https://…", text: $importURLText)
                     #if os(iOS)
@@ -180,3 +204,37 @@ struct LXSourcesView: View {
         }
     }
 }
+
+#if os(iOS)
+import UIKit
+
+/// Direct UIKit document picker. SwiftUI's fileImporter can silently drop
+/// the selection in sideloaded apps — the picker runs out of process and the
+/// handoff back into a sheet-hosted view may never call back — so iOS file
+/// imports go through the classic delegate-based picker instead.
+struct LXDocumentPicker: UIViewControllerRepresentable {
+    var onPick: (URL) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.javaScript, .plainText, .text, .data], asCopy: false)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+
+        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { onPick(url) }
+        }
+    }
+}
+#endif
