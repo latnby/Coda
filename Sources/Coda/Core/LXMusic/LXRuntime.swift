@@ -73,7 +73,7 @@ final class LXRuntime: @unchecked Sendable {
 
     private func installBridge(scriptInfo: [String: Any], script: String,
                                onDeclared: @escaping ([String: LXDeclaredSource]) -> Void) {
-        let context = self.context!
+        let context = self.context
 
         // console.* → silent sink (kept so scripts that log do not fail).
         let noop: @convention(block) () -> Void = {}
