@@ -72,6 +72,9 @@ struct TrackRow: View {
     var onRemoved: (() -> Void)?
     var onRecommendationReduced: ((Track) -> Void)?
     var onDeleteFromCloud: ((Track) -> Void)?
+    /// Set when the row lives in a locally stored list (an aggregate
+    /// playlist): removal is a local edit, not a platform API call.
+    var onRemoveFromList: (() -> Void)?
     let onPlay: () -> Void
 
     private let player = PlayerService.shared
@@ -98,11 +101,13 @@ struct TrackRow: View {
          highlightsTopRanks: Bool = false, showsDuration: Bool = true, showsTrailingActions: Bool = true, showsLikeButton: Bool = true, showsAlbumSubtitle: Bool = false,
          chartRank: Int? = nil, previousChartRank: Int? = nil, chartGrowthRatio: Double? = nil,
          trailingText: String? = nil, removableFromPlaylistID: Int? = nil, onRemoved: (() -> Void)? = nil,
-         onRecommendationReduced: ((Track) -> Void)? = nil, onDeleteFromCloud: ((Track) -> Void)? = nil, onPlay: @escaping () -> Void) {
+         onRecommendationReduced: ((Track) -> Void)? = nil, onDeleteFromCloud: ((Track) -> Void)? = nil,
+         onRemoveFromList: (() -> Void)? = nil, onPlay: @escaping () -> Void) {
         self.chartGrowthRatio = chartGrowthRatio
         self.chartRank = chartRank
         self.previousChartRank = previousChartRank
         self.onDeleteFromCloud = onDeleteFromCloud
+        self.onRemoveFromList = onRemoveFromList
         self.track = track
         self.index = index
         self.style = style
@@ -514,6 +519,9 @@ struct TrackRow: View {
                 }
             }
         }
+        if let onRemoveFromList {
+            Button("从歌单中删除", role: .destructive) { onRemoveFromList() }
+        }
         #if os(macOS)
         if !account.isLiked(track.id), let onRecommendationReduced {
             Button(String(localized: "减少推荐"), role: .destructive) {
@@ -777,6 +785,10 @@ struct TrackListView: View {
     var removableFromPlaylistID: Int?
     var onRemoved: ((Track) -> Void)?
     var onDeleteFromCloud: ((Track) -> Void)?
+    /// Aggregate (cross-platform) lists play as one mixed queue.
+    var allowMixedProviders = false
+    /// Local-list removal (aggregate playlists), keyed by the row's track.
+    var onRemoveFromList: ((Track) -> Void)?
     var recommendationContext: RecommendationContext?
     var onRecommendationReduced: ((Track, Track) -> Void)?
     var trailingText: ((Track) -> String?)?
@@ -856,10 +868,11 @@ struct TrackListView: View {
             onRecommendationReduced: recommendationContext == nil || recommendationHandler == nil
                 ? nil
                 : { replacement in recommendationHandler?(track, replacement) },
-            onDeleteFromCloud: onDeleteFromCloud
+            onDeleteFromCloud: onDeleteFromCloud,
+            onRemoveFromList: onRemoveFromList == nil ? nil : { onRemoveFromList?(track) }
         ) {
             player.play(tracks: tracks, source: source, startAt: track,
-                        context: context)
+                        context: context, allowMixedProviders: allowMixedProviders)
         }
         return VStack(spacing: 0) {
             if let selection {

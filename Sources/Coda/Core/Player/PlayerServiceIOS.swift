@@ -86,6 +86,12 @@ final class PlayerService: ObservableObject {
     // MARK: - Observable state
 
     @Published private(set) var queue: [Track] = []
+    /// True while the queue is an aggregate (cross-platform) list: starting a
+    /// track from another platform then follows the song instead of refusing
+    /// it, switching the app context via `switchProviderForPlayback`.
+    private(set) var queueAllowsMixedProviders = false
+    /// The open listening-statistics session for the report page.
+    private var listeningSession: (track: Track, startedAt: Date)?
     @Published private(set) var shuffledQueue: [Track] = []
     @Published private(set) var playNextList: [Track] = []
     @Published private(set) var currentIndex = -1
@@ -413,13 +419,15 @@ final class PlayerService: ObservableObject {
     ///   lists that place in the Dock menu's recently played section; callers
     ///   playing an ad-hoc selection (search results, a single track) omit it.
     func play(tracks: [Track], source: PlaySource, startAt track: Track? = nil,
-              context: PlayContext? = nil) {
+              context: PlayContext? = nil, allowMixedProviders: Bool = false) {
         guard !tracks.isEmpty else { return }
         let provider = MusicProviderContext.shared.current
-        guard tracks.allSatisfy({ ($0.platformSong?.source.rawValue ?? "netease") == provider.rawValue }) else {
+        guard allowMixedProviders
+                || tracks.allSatisfy({ ($0.platformSong?.source.rawValue ?? "netease") == provider.rawValue }) else {
             ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
             return
         }
+        queueAllowsMixedProviders = allowMixedProviders
         tracks.forEach { PlatformMusicAPI.shared.restore($0) }
         if let context { recordRecent(context) }
         isFMMode = false
@@ -1089,6 +1097,7 @@ final class PlayerService: ObservableObject {
         if repeatMode == .one, !isFMMode {
             scrobbled = false
             historySession = nil
+            if let track = currentTrack { listeningSession = (track, Date()) }
             seek(to: 0)
             engine.play()
             isPlaying = true
@@ -1102,9 +1111,16 @@ final class PlayerService: ObservableObject {
 
     private func startPlaying(_ track: Track,
                               localLease: OfflinePlaybackLease? = nil, resumeAt: TimeInterval = 0) {
-        guard (track.platformSong?.source.rawValue ?? "netease") == MusicProviderContext.shared.current.rawValue else {
-            ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
-            return
+        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
+        if trackProvider != MusicProviderContext.shared.current {
+            guard queueAllowsMixedProviders else {
+                ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
+                return
+            }
+            // A mixed queue follows the song: the app context switches to
+            // this track's platform so its stream resolves like a native
+            // queue, and the next track switches again the same way.
+            AccountStore.shared.switchProviderForPlayback(trackProvider)
         }
         fmLoadID = nil
         cancelQishuiFeedLoad()
@@ -1120,6 +1136,7 @@ final class PlayerService: ObservableObject {
         clearEngine()
         releaseCurrentPlaybackResources()
         currentTrack = track
+        listeningSession = (track, Date())
         playbackAccountID = AccountStore.shared.profile?.userId
         progress = resumeAt
         duration = track.duration
@@ -1278,6 +1295,9 @@ final class PlayerService: ObservableObject {
         // NetEase refused the request. Try other providers.
         if resolvedURL == nil || data?.freeTrialInfo != nil {
             if await resolveAndLoadUnblocked(track, generation: generation, resumeAt: resumeAt) { return }
+            // The same song from another platform, through the account
+            // signed in there — the last stop before giving up on the track.
+            if await resolveAndLoadSubstituted(track, generation: generation, resumeAt: resumeAt) { return }
         }
         guard generation == resolveGeneration else { return }
 
@@ -1343,6 +1363,51 @@ final class PlayerService: ObservableObject {
         guard case .loaded = loadResult else { return false }
 
         return true
+    }
+
+    /// Last-resort substitution: the origin platform cannot serve this song
+    /// and the unblock race already failed, so play the same song from
+    /// another platform using the account signed in there. Signed-in
+    /// platforms are tried first; the serving platform is announced with a
+    /// toast and the source label, so the swap is never silent.
+    private func resolveAndLoadSubstituted(
+        _ track: Track,
+        generation: Int,
+        resumeAt: TimeInterval = 0
+    ) async -> Bool {
+        guard generation == resolveGeneration else { return false }
+        let origin = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
+        let query = UnblockQuery(track: track)
+        let quality = SettingsManager.shared.preferredPlaybackQuality
+        let sources: [UnblockSource] = [NeteaseUnblockSource(), QQUnblockSource(),
+                                        KugouUnblockSource(), QishuiUnblockSource()]
+        var ordered: [UnblockSource] = []
+        for source in sources where source.id.platform != nil && source.id.platform != origin {
+            if await source.isSignedIn() { ordered.append(source) }
+        }
+        for source in sources where source.id.platform != nil && source.id.platform != origin
+            && !ordered.contains(where: { $0.id == source.id }) {
+            if await source.isAvailable() { ordered.append(source) }
+        }
+        for source in ordered {
+            guard generation == resolveGeneration else { return false }
+            guard let stream = try? await source.resolve(query, quality: quality) else { continue }
+            guard generation == resolveGeneration, let platform = source.id.platform else { return false }
+            currentUnblockSourceID = source.id
+            unblockSource = "自动换源 · \(platform.name)"
+            externalQualityTitle = stream.title
+            externalBitrate = stream.bitrate
+            reportingBitrate = stream.bitrate.map { $0 / 1000 }
+            servedQishuiQualityOption = nil
+            servedQuality = stream.quality?.rawValue
+            isTrial = false
+            ToastCenter.shared.show("《\(track.name)》原平台播不了，已自动换源到\(platform.name)")
+            let loadResult = await loadResolvedURL(
+                track, url: stream.url, durationMS: nil, generation: generation, resumeAt: resumeAt)
+            guard case .loaded = loadResult else { return false }
+            return true
+        }
+        return false
     }
 
     private func handleUnplayable(_ track: Track, reason explicitReason: String? = nil) {
@@ -1784,14 +1849,22 @@ final class PlayerService: ObservableObject {
             return
         }
         cancelQishuiPrefetch()
-        guard !SettingsManager.shared.alwaysHighestAudioQuality else { queuePrefetcher.update(nil); return }
-        let upcoming = PrefetchLimits().window(nextCandidates().map(\.track))
+        var candidates = nextCandidates().map(\.track)
+        if queueAllowsMixedProviders {
+            // Prefetch resolves under the current platform; a song from
+            // another platform waits for its own turn at the front instead
+            // of being fetched under the wrong platform's catalog.
+            let currentRaw = MusicProviderContext.shared.current.rawValue
+            candidates = candidates.filter { ($0.platformSong?.source.rawValue ?? "netease") == currentRaw }
+        }
+        let upcoming = PrefetchLimits().window(candidates)
         guard !upcoming.isEmpty else { queuePrefetcher.update(nil); return }
         let scope = offlineAccountScope
         let pending = Set(DownloadManager.shared.pendingJobs.filter { $0.accountScope == scope }.map(\.track.id))
         queuePrefetcher.update(.init(scope: scope, currentTrackID: current.id, tracks: upcoming,
                                      quality: SettingsManager.shared.preferredPlaybackQuality.rawValue,
-                                     pendingDownloadTrackIDs: pending))
+                                     pendingDownloadTrackIDs: pending,
+                                     alwaysHighest: SettingsManager.shared.alwaysHighestAudioQuality))
     }
 
     private func cancelQishuiPrefetch() {
@@ -1980,7 +2053,20 @@ final class PlayerService: ObservableObject {
             duration: track.duration, quality: servedQuality, fee: track.fee, bitrate: reportingBitrate)
     }
 
+    /// Closes the open listening-statistics session, crediting the outgoing
+    /// track with the time it actually played (its full length on a natural
+    /// end, the played position when skipped away from).
+    private func finalizeListeningSession(completed: Bool) {
+        guard let session = listeningSession else { return }
+        listeningSession = nil
+        let listened = completed ? session.track.duration : min(progress, session.track.duration)
+        guard listened >= 5 else { return }
+        ListeningStatsStore.shared.record(track: session.track, listenedSeconds: listened,
+                                          startedAt: session.startedAt)
+    }
+
     private func scrobbleIfNeeded(completed: Bool) {
+        finalizeListeningSession(completed: completed)
         qishuiHistoryReporter.finish()
         if source.qishuiFeed != nil { qishuiContinuation.record(currentTrack, position: progress) }
         kugouReporter.finish(position: engine.currentPlaybackTime ?? progress, completed: completed)
@@ -2128,9 +2214,11 @@ final class PlayerService: ObservableObject {
     }
 
     func resetForMusicAccountChange() {
+        finalizeListeningSession(completed: false)
         suspendForAccountChange()
         qishuiContinuation.reset()
         qishuiFeedDrained = false
+        queueAllowsMixedProviders = false
         queue = []; shuffledQueue = []; playNextList = []
         currentTrack = nil; currentIndex = -1
         recentContexts = []; source = .none; fmUpcoming = []

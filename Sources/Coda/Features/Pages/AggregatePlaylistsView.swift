@@ -93,75 +93,44 @@ private struct AggregatePlaylistRef: Identifiable {
 
 // MARK: - Detail
 
+/// The aggregate detail page wears the ordinary playlist page's shell —
+/// the same header, action row and track panel as `PlaylistDetailView` —
+/// over the local store. Playback hands the whole list to the player as a
+/// mixed-provider queue, so the songs play end to end, each from the
+/// platform it was collected from.
 struct AggregatePlaylistDetailView: View {
     let playlistID: UUID
 
     @ObservedObject private var store = AggregatePlaylistStore.shared
     @EnvironmentObject private var player: PlayerService
     @Environment(\.dismiss) private var dismiss
+    @State private var filter = ""
+    @State private var searchFocused = false
+    @State private var sortOrder: PlaylistTrackSort = .addedNewestFirst
     @State private var showRename = false
     @State private var renameText = ""
     @State private var showDeleteConfirm = false
 
     private var playlist: AggregatePlaylist? { store.playlist(id: playlistID) }
 
+    private func filteredTracks(_ playlist: AggregatePlaylist) -> [Track] {
+        let ordered = sortOrder.sorted(playlist.tracks)
+        let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return ordered }
+        return ordered.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.artistNames.localizedCaseInsensitiveContains(query)
+                || $0.album.name.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     var body: some View {
         Group {
             if let playlist {
-                List {
-                    Section {
-                        header(playlist)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
-                    Section {
-                        ForEach(playlist.tracks, id: \.aggregateIdentity) { track in
-                            row(track)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        store.remove(trackIdentity: track.aggregateIdentity, from: playlistID)
-                                    } label: {
-                                        Label("从聚合歌单移除", systemImage: "trash")
-                                    }
-                                }
-                        }
-                        .onMove { store.moveTracks(in: playlistID, from: $0, to: $1) }
-                        .onDelete { store.deleteTracks(in: playlistID, at: $0) }
-                    } header: {
-                        if !playlist.sourceSummary.isEmpty {
-                            Text(playlist.sourceSummary)
-                        }
-                    }
-                }
-                .listStyle(.plain)
+                content(playlist)
             } else {
                 Text("歌单已删除")
                     .foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle(playlist?.name ?? "聚合歌单")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("关闭") { dismiss() }
-            }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                EditButton()
-                Menu {
-                    Button {
-                        renameText = playlist?.name ?? ""
-                        showRename = true
-                    } label: {
-                        Label("重命名", systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("删除歌单", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
             }
         }
         .alert("重命名", isPresented: $showRename) {
@@ -181,91 +150,87 @@ struct AggregatePlaylistDetailView: View {
         }
     }
 
-    private func header(_ playlist: AggregatePlaylist) -> some View {
-        VStack(spacing: 14) {
-            CachedAsyncImage(url: playlist.coverURLString?.resizedImageURL(512))
-                .frame(width: 180, height: 180)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.secondary.opacity(0.15))
-                )
-            Text(playlist.name)
-                .font(.title3.weight(.bold))
-                .multilineTextAlignment(.center)
-            Text("\(playlist.tracks.count) 首")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Button {
-                guard let first = playlist.tracks.first else { return }
-                playFrom(first, in: playlist)
-            } label: {
-                Label("播放全部", systemImage: "play.fill")
-                    .font(.headline)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(playlist.tracks.isEmpty)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-    }
-
-    /// The player only ever plays one platform at a time, so an aggregate
-    /// playlist plays as the tapped track's platform slice, in list order,
-    /// switching the app's platform first when needed. Each song still
-    /// plays from the platform it was collected from, and a song that
-    /// fails on its own platform falls into the usual unblock path.
-    private func playFrom(_ tapped: Track, in playlist: AggregatePlaylist) {
-        let target = MusicProvider(rawValue: tapped.platformSong?.source.rawValue ?? "netease") ?? .netease
-        let subset = playlist.tracks.filter {
-            ($0.platformSong?.source ?? .netease).rawValue == target.rawValue
-        }
-        let start = subset.first { $0.aggregateIdentity == tapped.aggregateIdentity } ?? subset.first
-        guard let start else { return }
-        let needsSwitch = MusicProviderContext.shared.current != target
-        Task {
-            if needsSwitch {
-                try? await MusicAccountManager.shared.selectProvider(target)
-                ToastCenter.shared.show("已切换到\(target.name)，播放歌单中该平台的 \(subset.count) 首")
-            }
-            player.play(tracks: subset, source: .none, startAt: start)
-        }
-    }
-
-    private func row(_ track: Track) -> some View {
-        Button {
-            guard let playlist else { return }
-            playFrom(track, in: playlist)
-        } label: {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: track.album.picUrl?.resizedImageURL(96), animated: false)
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.secondary.opacity(0.15))
-                    )
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.name)
-                        .font(.body)
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
-                    HStack(spacing: 6) {
-                        Text(track.artistNames)
-                            .lineLimit(1)
-                        Text("·")
-                        Text(track.aggregateSourceName)
+    private func content(_ playlist: AggregatePlaylist) -> some View {
+        let filtered = filteredTracks(playlist)
+        return ScenePreservingScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                PlaylistHeader(
+                    artworkURL: playlist.coverURLString?.resizedImageURL(384),
+                    title: playlist.name,
+                    subtitle: String(localized: "聚合歌单"),
+                    avatarURL: nil,
+                    metadataText: "\(playlist.tracks.count) 首歌曲",
+                    filter: $filter, searchFocused: $searchFocused
+                ) {
+                    PlaylistPrimaryActions(
+                        isSaved: true, canSave: false, canPlay: !filtered.isEmpty, isSaving: false,
+                        onToggleSaved: {},
+                        onPlayAll: { playAll(filtered) }
+                    ) {
+                        moreMenu
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
-                Spacer()
+                if !filter.isEmpty {
+                    Text("找到 \(filtered.count) 首匹配歌曲")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Theme.Spacing.page)
+                }
+                if playlist.tracks.isEmpty {
+                    Text("歌单里还没有歌曲。在任意歌曲的菜单里选「添加到聚合歌单」就能加进来。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Theme.Spacing.page)
+                } else {
+                    MusicTrackPanel(
+                        tracks: filtered, source: .none, context: nil,
+                        showsLikeButton: false,
+                        allowMixedProviders: true,
+                        onRemoveFromList: { store.remove(trackIdentity: $0.aggregateIdentity, from: playlistID) },
+                        trailingText: { $0.aggregateSourceName }
+                    )
+                }
+                PlayerClearanceSpacer()
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .modifier(DetailArtworkBackground(artworkURL: playlist.coverURLString?.resizedImageURL(384)))
+        .musicLibraryNavigationTitle(playlist.name, enabled: true)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("关闭") { dismiss() }
+            }
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Picker("排序方式", selection: $sortOrder) {
+                ForEach(PlaylistTrackSort.allCases, id: \.self) { sort in
+                    Text(sort.rawValue).tag(sort)
+                }
+            }
+            Divider()
+            Button {
+                renameText = playlist?.name ?? ""
+                showRename = true
+            } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                Label("删除歌单", systemImage: "trash")
+            }
+        } label: {
+            PlaylistMoreLabel()
+        }
+        .accessibilityLabel("更多操作")
+    }
+
+    private func playAll(_ tracks: [Track]) {
+        guard let first = tracks.first else { return }
+        player.play(tracks: tracks, source: .none, startAt: first, allowMixedProviders: true)
     }
 }
 

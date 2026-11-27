@@ -6,10 +6,14 @@ struct QueuePrefetchRequest: Equatable {
     let tracks: [Track]
     let quality: String
     let pendingDownloadTrackIDs: Set<Int>
+    /// With "always highest" on, prefetch resolves each song's real highest
+    /// tier and files the cache entry under the served tier, which is the
+    /// key playback looks up in that mode.
+    var alwaysHighest = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.scope == rhs.scope && lhs.currentTrackID == rhs.currentTrackID && lhs.tracks == rhs.tracks
-            && lhs.quality == rhs.quality
+            && lhs.quality == rhs.quality && lhs.alwaysHighest == rhs.alwaysHighest
     }
 }
 
@@ -28,7 +32,7 @@ struct QueuePrefetchSource {
 /// replaced queue or account.
 @MainActor
 final class QueuePrefetcher {
-    typealias Resolver = (Track, String) async throws -> QueuePrefetchSource?
+    typealias Resolver = (Track, String, Bool) async throws -> QueuePrefetchSource?
     typealias Downloader = (URLRequest) async throws -> (URL, URLResponse)
     private let cache: AudioCache
     private let resolver: Resolver
@@ -120,7 +124,7 @@ final class QueuePrefetcher {
                     continue
                 }
                 guard isCurrent(ticket) else { return }
-                guard let source = try await resolver(track, request.quality) else { continue }
+                guard let source = try await resolver(track, request.quality, request.alwaysHighest) else { continue }
                 guard isCurrent(ticket) else { return }
                 guard !pendingDownloadTrackIDs.contains(track.id) else { visitedTrackIDs.remove(track.id); continue }
                 let limitMB = await cacheLimitMB()
@@ -129,7 +133,8 @@ final class QueuePrefetcher {
                 // has no room for ends the window.
                 guard CachingAudioResourceLoader.canCache(contentLength: max(source.byteCount, 1), maximumSizeMB: limitMB) else { continue }
                 guard source.byteCount <= limits.bytes - windowBytes else { windowStopped = true; return }
-                let stored = try await store(source, track: track, quality: request.quality, limitMB: limitMB, ticket: ticket)
+                let writeQuality = request.alwaysHighest ? (source.servedQuality ?? request.quality) : request.quality
+                let stored = try await store(source, track: track, quality: writeQuality, limitMB: limitMB, ticket: ticket)
                 guard isCurrent(ticket) else { return }
                 guard let stored else { continue }
                 windowBytes += stored
@@ -210,8 +215,16 @@ final class QueuePrefetcher {
 
     /// NetEase's own file at the chosen quality. Trials and songs it refuses
     /// are left to playback, which knows how to fall back.
-    static func resolveSongURL(track: Track, quality: String) async throws -> QueuePrefetchSource? {
+    static func resolveSongURL(track: Track, quality: String, alwaysHighest: Bool = false) async throws -> QueuePrefetchSource? {
         await PlatformMusicAPI.shared.restore(track)
+        if alwaysHighest {
+            guard let data = try await NeteaseAPI.preferredSongURL(
+                    id: track.id, quality: AudioQuality(rawValue: quality) ?? .hires, alwaysHighest: true),
+                  data.freeTrialInfo == nil, let string = data.url,
+                  let url = track.remotePlaybackURL(string) else { return nil }
+            return .init(url: url, servedQuality: data.resolvedAudioQuality?.rawValue ?? data.level,
+                         byteCount: Int64(max(data.size, 0)), fileExtension: data.type)
+        }
         guard let data = try await NeteaseAPI.songURL(ids: [track.id], level: quality).first,
               data.freeTrialInfo == nil, let string = data.url,
               let url = track.remotePlaybackURL(string) else { return nil }

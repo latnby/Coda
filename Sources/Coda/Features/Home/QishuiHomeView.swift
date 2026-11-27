@@ -136,7 +136,13 @@ private struct QishuiSceneGrid: View {
 
             if scenes.count > visibleCount {
                 Button {
-                    expanded.toggle()
+                    // No animation on the toggle: the button used to glide
+                    // along with the grid as it grew or shrank ("flying"
+                    // up and down). The grid now snaps and the button lands
+                    // in place at once.
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { expanded.toggle() }
                 } label: {
                     HStack(spacing: 4) {
                         Text(expanded ? "收起" : "展开")
@@ -149,6 +155,7 @@ private struct QishuiSceneGrid: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .animation(nil, value: expanded)
             }
         }
         .onReceive(player.$pendingQishuiScene.combineLatest(player.$source)

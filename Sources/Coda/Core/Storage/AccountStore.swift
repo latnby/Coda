@@ -105,6 +105,30 @@ final class AccountStore: ObservableObject {
         await bootstrap()
     }
 
+    /// Playback-driven provider follow: a mixed-provider queue (an aggregate
+    /// playlist) moves to a song from another platform, and the app context
+    /// follows the song so its stream can resolve. Unlike `changeProvider`
+    /// this never touches the player or the download manager — playback is
+    /// mid-flight by definition — and the account repopulates in the
+    /// background via `bootstrap()`.
+    func switchProviderForPlayback(_ value: MusicProvider) {
+        MusicProviderContext.shared.activate(value)
+        guard provider != value else { return }
+        bootstrapGeneration += 1
+        cancelPlaylistSync()
+        qqRenewalTask?.cancel()
+        qqRenewalTask = nil
+        provider = value
+        sessionRevision = UUID()
+        pendingPlatformLikes = [:]
+        profileBinding = nil
+        profile = nil
+        likedTrackIDs = []; userPlaylists = []; likedAlbums = []; likedArtists = []
+        libraryRefresh.invalidate(); sublistsRefresh.invalidate()
+        SidebarResources.resetAccount()
+        Task { await bootstrap() }
+    }
+
     /// Called at launch and after login succeeds.
     func bootstrap() async {
         observeLibraryNetwork()

@@ -94,10 +94,10 @@ enum PlaybackQueuePlan {
     }
 }
 
-/// How far ahead the song cache fills while the network is free: a few songs,
-/// a short stretch of listening, and a bounded number of bytes.
+/// How far ahead the song cache fills while the network is free: the next
+/// two songs, a short stretch of listening, and a bounded number of bytes.
 struct PrefetchLimits: Equatable {
-    var tracks = 5
+    var tracks = 2
     var seconds: TimeInterval = 20 * 60
     var bytes: Int64 = 100_000_000
 

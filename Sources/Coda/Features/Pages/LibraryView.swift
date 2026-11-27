@@ -117,6 +117,7 @@ struct LibraryView: View {
                     }
                 }
             }
+            ListeningReportEntryCard()
             if account.hasAuthCookie {
                 HStack {
                     SectionHeader(title: LocalizedStringKey(account.provider.playlistSectionTitle), action: {
