@@ -282,7 +282,7 @@ struct NowPlayingView: View {
     /// previous track, swipe down for the next. Only a clearly vertical
     /// drag past a threshold counts, so horizontal slider drags and taps
     /// on the transport buttons are unaffected.
-    private var portraitSkipGesture: DragGesture {
+    private var portraitSkipGesture: some Gesture {
         DragGesture(minimumDistance: 24, coordinateSpace: .local)
             .onEnded { value in
                 let dy = value.translation.height
