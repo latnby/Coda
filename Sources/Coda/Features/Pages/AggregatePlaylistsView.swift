@@ -155,7 +155,7 @@ struct AggregatePlaylistDetailView: View {
         return ScenePreservingScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 PlaylistHeader(
-                    artworkURL: playlist.coverURLString?.resizedImageURL(384),
+                    artworkURL: playlist.coverURLString,
                     title: playlist.name,
                     subtitle: String(localized: "聚合歌单"),
                     avatarURL: nil,
@@ -193,7 +193,7 @@ struct AggregatePlaylistDetailView: View {
                 PlayerClearanceSpacer()
             }
         }
-        .modifier(DetailArtworkBackground(artworkURL: playlist.coverURLString?.resizedImageURL(384)))
+        .modifier(DetailArtworkBackground(artworkURL: playlist.coverURLString))
         .musicLibraryNavigationTitle(playlist.name, enabled: true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
