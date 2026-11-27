@@ -12,6 +12,29 @@ struct CodaIOSApp: App {
 }
 
 final class DownloadAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        Task { @MainActor in
+            AppShortcutRouter.installShortcutItems()
+            // Cold launch from a quick action: hand it to the router; the
+            // main window consumes it once it is up.
+            if let item = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem,
+               let action = AppShortcutRouter.Action.from(type: item.type) {
+                AppShortcutRouter.shared.request(action)
+            }
+        }
+        return true
+    }
+
+    func application(_ application: UIApplication, performActionFor shortcutItem: UIApplicationShortcutItem,
+                     completionHandler: @escaping (Bool) -> Void) {
+        guard let action = AppShortcutRouter.Action.from(type: shortcutItem.type) else {
+            completionHandler(false)
+            return
+        }
+        Task { @MainActor in AppShortcutRouter.shared.request(action) }
+        completionHandler(true)
+    }
+
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
         OfflineDownloadEvents.handleBackgroundSession(identifier: identifier, completion: completionHandler)

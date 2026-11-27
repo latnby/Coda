@@ -1865,6 +1865,13 @@ final class PlayerService: ObservableObject {
                                      quality: SettingsManager.shared.preferredPlaybackQuality.rawValue,
                                      pendingDownloadTrackIDs: pending,
                                      alwaysHighest: SettingsManager.shared.alwaysHighestAudioQuality))
+        // Warm the next songs' artwork alongside their audio, so a track
+        // change never waits on a cover download.
+        for track in upcoming {
+            if let pic = track.album.picUrl, let url = URL(string: pic) {
+                Task { _ = await ImageCache.shared.image(for: url) }
+            }
+        }
     }
 
     private func cancelQishuiPrefetch() {

@@ -802,6 +802,7 @@ public struct IOSMainWindow: View {
     @StateObject private var toasts = ToastCenter.shared
     @StateObject private var updater = IOSUpdater.shared
     @StateObject private var artworkStore = NowPlayingArtworkStore()
+    @ObservedObject private var shortcutRouter = AppShortcutRouter.shared
     @State private var pendingPlayerDestination: (() -> Void)?
     @Namespace private var nowPlayingTransition
     @Environment(\.colorScheme) private var systemColorScheme
@@ -840,6 +841,8 @@ public struct IOSMainWindow: View {
             .environment(\.openLogin, { showLogin = true })
             .environment(\.openDestination, openDestination)
             .modifier(PlaybackLifecycle())
+            .onChange(of: shortcutRouter.pending) { _ in handlePendingShortcut() }
+            .onAppear { handlePendingShortcut() }
             .task {
                 // Prepare independently of authentication/download setup and page transitions.
                 _ = await ArtworkFlowRenderer.prepared()
@@ -948,6 +951,24 @@ public struct IOSMainWindow: View {
                         .environment(\.scenePhase, scenePhase)
                 }
             )
+    }
+
+    /// Home-screen quick actions: resume where playback left off, open
+    /// my favorites, or land on the library page that hosts the aggregate
+    /// playlists.
+    private func handlePendingShortcut() {
+        guard let action = shortcutRouter.consume() else { return }
+        switch action {
+        case .resume:
+            if player.hasCurrentTrack, !player.isPlaying { player.togglePlayPause() }
+        case .favorites:
+            openPlayerDestination(.sidebar(.likedSongs))
+        case .aggregate:
+            if UIDevice.current.userInterfaceIdiom != .pad {
+                selectedTab = .library
+                libraryPath = []
+            }
+        }
     }
 
     private func openPlayerDestination(_ destination: Destination) {
