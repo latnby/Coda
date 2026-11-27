@@ -252,7 +252,7 @@ struct IOSMiniPlayerBar: View {
 
                 // The compact inline accessory has room for the title only.
                 if !presentation.isInline {
-                    Text(player.currentTrack?.artistNames ?? "Coda")
+                    Text(player.currentTrack?.artistNames ?? "Dragon Music")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

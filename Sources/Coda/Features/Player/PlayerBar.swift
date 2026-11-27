@@ -64,7 +64,7 @@ private struct DockedPlayerBar: View {
                         .frame(height: 18)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text(player.currentTrack?.artistNames ?? "Coda")
+                    Text(player.currentTrack?.artistNames ?? "Dragon Music")
                         .font(Theme.Typography.secondary)
                         .frame(height: 16)
                         .foregroundStyle(.secondary)

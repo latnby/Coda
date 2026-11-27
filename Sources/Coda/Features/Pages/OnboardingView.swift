@@ -84,7 +84,7 @@ struct OnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
                 .accessibilityHidden(true)
-            Text("欢迎使用 Coda")
+            Text("欢迎使用 Dragon Music")
                 .font(.system(size: 28, weight: .bold))
                 .padding(.top, 20)
             Text("登录音乐平台账号，同步歌单、每日推荐和会员音质。之后可在设置中添加更多账号并随时切换。")

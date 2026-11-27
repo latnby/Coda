@@ -15,10 +15,6 @@ struct SettingsView: View {
 
     /// iPhone presents settings in a sheet with its own stack; Mac and iPad
     /// show them in the main content column and push shared destinations.
-    private enum SettingsPage: Hashable {
-        case licenses
-    }
-
     private var usesMainColumn: Bool {
         #if os(iOS)
         UIDevice.current.userInterfaceIdiom == .pad
@@ -74,9 +70,9 @@ struct SettingsView: View {
                 if account.provider == .netease { SyncSettingsSection() }
 
                 if usesMainColumn {
-                    AboutSections(licensesRoute: Destination.openSourceLicenses, showsDisclaimer: $showsDisclaimer)
+                    AboutSections(showsDisclaimer: $showsDisclaimer)
                 } else {
-                    AboutSections(licensesRoute: SettingsPage.licenses, showsDisclaimer: $showsDisclaimer)
+                    AboutSections(showsDisclaimer: $showsDisclaimer)
                 }
             }
             .pageFormRows()
@@ -95,12 +91,6 @@ struct SettingsView: View {
                            onFinish: { showsOnboardingPreview = false })
         }
         #endif
-        .navigationDestination(for: SettingsPage.self) { page in
-            switch page {
-            case .licenses:
-                OpenSourceLicensesView()
-            }
-        }
     }
 
 }

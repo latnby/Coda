@@ -103,7 +103,6 @@ enum SidebarItem: Hashable {
 enum Destination: Hashable {
     case sidebar(SidebarItem)
     case downloaded, downloadTasks
-    case openSourceLicenses
     #if os(macOS)
     case shortcuts
     #endif
@@ -209,8 +208,6 @@ struct DestinationsModifier: ViewModifier {
             DownloadedMusicView()
         case .downloadTasks:
             DownloadTasksView()
-        case .openSourceLicenses:
-            OpenSourceLicensesView()
         #if os(macOS)
         case .shortcuts:
             ShortcutSettingsView()

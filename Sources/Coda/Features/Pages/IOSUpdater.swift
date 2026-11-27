@@ -33,7 +33,7 @@ final class IOSUpdater: NSObject, ObservableObject {
     /// Destination filename for the current download. Set on the main actor in
     /// `download(_:)` before the task starts, then read once from the download
     /// delegate queue — the download is single-flight, so this hand-off is safe.
-    nonisolated(unsafe) private var pendingDownloadFilename = "Coda.ipa"
+    nonisolated(unsafe) private var pendingDownloadFilename = "DragonMusic.ipa"
 
     func check(interactive: Bool) {
         // Keep a network update sheet from stealing input during transition UI tests.
@@ -89,14 +89,14 @@ final class IOSUpdater: NSObject, ObservableObject {
     }
 
     /// Non-TrollStore path: download the IPA into Documents (findable in the
-    /// Files app under On My iPhone ▸ Coda), then open the share sheet so the
+    /// Files app under On My iPhone ▸ Dragon Music), then open the share sheet so the
     /// user can Save to Files or hand it straight to a signing app.
     func download(_ release: ReleaseChecker.Release) {
         guard let ipaURL = release.ipaURL else {
             openReleasePage(release)
             return
         }
-        pendingDownloadFilename = "Coda-\(release.version).ipa"
+        pendingDownloadFilename = "DragonMusic-\(release.version).ipa"
         phase = .downloading(0)
         Task {
             do {
@@ -163,7 +163,7 @@ extension IOSUpdater: URLSessionDownloadDelegate {
 
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                                 didFinishDownloadingTo location: URL) {
-        // Move into Documents (findable in Files under On My iPhone ▸ Coda via
+        // Move into Documents (findable in Files under On My iPhone ▸ Dragon Music via
         // UIFileSharingEnabled) before the temp download is reaped.
         let dir = (try? FileManager.default.url(for: .documentDirectory,
                                                 in: .userDomainMask,
@@ -236,7 +236,7 @@ struct IOSUpdaterSheet: View {
                 Image(systemName: "square.and.arrow.down.fill")
                     .font(.system(size: 40)).foregroundStyle(Theme.accent)
                 Text("下载完成").font(Theme.Typography.cardTitle)
-                Text("已保存到「文件」App ▸ 我的 iPhone ▸ Coda。用下方按钮直接导入签名工具（全能签 / ESign 等），或在「文件」里手动打开。")
+                Text("已保存到「文件」App ▸ 我的 iPhone ▸ Dragon Music。用下方按钮直接导入签名工具（全能签 / ESign 等），或在「文件」里手动打开。")
                     .font(Theme.Typography.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 primaryButton("导入到签名工具") { updater.share(url) }

@@ -14,6 +14,6 @@ enum CodaIdentity {
     static var syncDirectoryName: String { namespace == developmentBundleIdentifier ? "Coda Dev" : "Coda" }
     static func keychainService(_ purpose: String) -> String { namespace + "." + purpose }
     static var releaseRepository: String {
-        Bundle.main.object(forInfoDictionaryKey: "CodaReleaseRepository") as? String ?? "Wow-CaiCai/Coda"
+        Bundle.main.object(forInfoDictionaryKey: "CodaReleaseRepository") as? String ?? "latnby/Coda"
     }
 }

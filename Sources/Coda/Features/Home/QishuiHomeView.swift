@@ -100,15 +100,51 @@ private struct QishuiSceneGrid: View {
     #endif
     @State private var selectedMode: String?
     @State private var pendingMode: String?
+    @State private var expanded = false
+    @State private var gridWidth: CGFloat = 375
     private let player = PlayerService.shared
 
+    /// Collapsed, the grid shows its first two rows; the rest of the modes
+    /// (there can be dozens) sit behind the expand button below.
+    private var visibleCount: Int {
+        let spacing = Theme.Spacing.control
+        let columns = max(1, Int((gridWidth + spacing) / (88 + spacing)))
+        return columns * 2
+    }
+
     var body: some View {
-        ListeningModeGrid {
-            ForEach(scenes) { scene in
-                ListeningModeTile(title: scene.title, icon: modeIcon(for: scene.mode),
-                                  isSelected: scene.mode == selectedMode, isPending: scene.mode == pendingMode) {
-                    player.playQishuiScene(scene)
+        VStack(alignment: .leading, spacing: HomeLayout.headerSpacing) {
+            ListeningModeGrid {
+                ForEach(expanded ? scenes : Array(scenes.prefix(visibleCount))) { scene in
+                    ListeningModeTile(title: scene.title, icon: modeIcon(for: scene.mode),
+                                      isSelected: scene.mode == selectedMode, isPending: scene.mode == pendingMode) {
+                        player.playQishuiScene(scene)
+                    }
                 }
+            }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { gridWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { gridWidth = $0 }
+                }
+            }
+
+            if scenes.count > visibleCount {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(expanded ? "收起" : "展开全部 \(scenes.count) 个模式")
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .onReceive(player.$pendingQishuiScene.combineLatest(player.$source)

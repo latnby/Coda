@@ -40,7 +40,7 @@ struct StorageSpaceSections: View {
                     Text(model.snapshot.map { format($0.appBytes) } ?? "—")
                         .font(Theme.Typography.body.weight(.semibold)).monospacedDigit()
                 } label: {
-                    Label(model.snapshot?.partial == true ? String(localized: "已统计的 Coda 占用") : String(localized: "Coda 占用"),
+                    Label(model.snapshot?.partial == true ? String(localized: "已统计的 Dragon Music 占用") : String(localized: "Dragon Music 占用"),
                           systemImage: "internaldrive")
                 }
 
@@ -298,7 +298,7 @@ extension AppDataKind {
         case .diagnostics: String(localized: "播放过渡采样、调试记录与登录诊断，仅用于排查问题。")
         case .offlineIndex: String(localized: "已下载歌曲的索引、歌词与封面，删除下载时一并移除。")
         case .account: String(localized: "登录凭据、账号信息与设备标识，退出登录后删除。")
-        case .application: String(localized: "Coda 程序本身，卸载应用后释放。")
+        case .application: String(localized: "Dragon Music 程序本身，卸载应用后释放。")
         case .other: String(localized: "偏好设置、播放队列与系统生成的启动快照。")
         }
     }

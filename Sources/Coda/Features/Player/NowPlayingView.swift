@@ -584,25 +584,30 @@ struct NowPlayingView: View {
         }
     }
 
+    /// Tapping the artwork itself switches between the large-cover page and
+    /// the lyrics page, mirroring the lyrics button in the utility bar: on
+    /// the cover page the big artwork returns to lyrics; in the lyrics
+    /// header the small artwork returns to the large cover.
     @ViewBuilder
     private func portraitArtworkLink(size: CGFloat, expanded: Bool) -> some View {
-        if let album = player.currentTrack?.album, album.id != 0 {
-            Button {
-                openTrackDestination(.album(album.id))
-            } label: {
-                Color.clear
-                    .frame(width: size, height: size)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        Button {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                portraitControlsCollapsed = false
             }
-            .buttonStyle(.plain)
-            .noFocusRing()
-            .accessibilityLabel("打开专辑：\(album.name)")
-            .accessibilityIdentifier(expanded ? "portraitLargeArtwork" : "portraitSmallArtwork")
-        } else {
-            Color.clear.frame(width: size, height: size)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            playlistTrack = nil
+            iPadPanel = .lyrics
+            showsSingleColumnLyrics = expanded
+        } label: {
+            Color.clear
+                .frame(width: size, height: size)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .buttonStyle(.plain)
+        .noFocusRing()
+        .accessibilityLabel(expanded ? "显示歌词" : "显示大封面")
+        .accessibilityIdentifier(expanded ? "portraitLargeArtwork" : "portraitSmallArtwork")
     }
 
     private var portraitMetadataActionsWidth: CGFloat {
