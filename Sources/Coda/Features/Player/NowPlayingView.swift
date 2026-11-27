@@ -247,7 +247,7 @@ struct NowPlayingView: View {
     }
 
     private func playbackControls<Utility: View>(width: CGFloat, animated: Bool = false,
-                                                 metrics: ControlMetrics? = nil, swipeToSkip: Bool = false,
+                                                 metrics: ControlMetrics? = nil,
                                                  @ViewBuilder utility: () -> Utility) -> some View {
         let metrics = metrics ?? ControlMetrics(width: width)
         return VStack(spacing: 0) {
@@ -256,39 +256,20 @@ struct NowPlayingView: View {
                                    trackHeight: metrics.trackHeight)
             }
             Color.clear.frame(height: metrics.progressGap)
-            // Everything below the scrubber doubles as the vertical-swipe
-            // skip zone in the portrait player, so swipes never fight the
-            // scrubber or the lyrics scroll view above it.
-            VStack(spacing: 0) {
-                controlLayer(animated: animated, offset: 165, showDelay: 0.05, hideDelay: 0.05) {
-                    PlayerTransportControls(width: width, height: metrics.transportHeight)
-                }
-                Color.clear.frame(height: metrics.transportGap)
-                controlLayer(animated: animated, offset: 148, showDelay: 0.075, hideDelay: 0.025) {
-                    volumeControl(rowHeight: metrics.volumeHeight, trackHeight: metrics.trackHeight)
-                }
-                Color.clear.frame(height: metrics.utilityGap)
-                controlLayer(animated: animated, offset: 128, showDelay: 0.10, hideDelay: 0) {
-                    utility().frame(height: metrics.utilityHeight)
-                }
+            controlLayer(animated: animated, offset: 165, showDelay: 0.05, hideDelay: 0.05) {
+                PlayerTransportControls(width: width, height: metrics.transportHeight)
             }
-            .simultaneousGesture(portraitSkipGesture, including: swipeToSkip ? .all : .none)
+            Color.clear.frame(height: metrics.transportGap)
+            controlLayer(animated: animated, offset: 148, showDelay: 0.075, hideDelay: 0.025) {
+                volumeControl(rowHeight: metrics.volumeHeight, trackHeight: metrics.trackHeight)
+            }
+            Color.clear.frame(height: metrics.utilityGap)
+            controlLayer(animated: animated, offset: 128, showDelay: 0.10, hideDelay: 0) {
+                utility().frame(height: metrics.utilityHeight)
+            }
         }
         .frame(width: width)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Douyin-style vertical skip for the portrait player: swipe up for the
-    /// previous track, swipe down for the next. Only a clearly vertical
-    /// drag past a threshold counts, so horizontal slider drags and taps
-    /// on the transport buttons are unaffected.
-    private var portraitSkipGesture: some Gesture {
-        DragGesture(minimumDistance: 24, coordinateSpace: .local)
-            .onEnded { value in
-                let dy = value.translation.height
-                guard abs(dy) > abs(value.translation.width), abs(dy) >= 56 else { return }
-                if dy < 0 { player.previous() } else { player.next() }
-            }
     }
 
     @ViewBuilder
@@ -529,10 +510,6 @@ struct NowPlayingView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Big-cover mode: the whole screen is the swipe-to-skip surface.
-        // In lyrics mode this stays off and only the zone below the
-        // scrubber (inside the playback controls) responds.
-        .simultaneousGesture(portraitSkipGesture, including: showsArtwork ? .all : .none)
         .clipped()
         .onChange(of: showsArtwork) { expanded in
             registerPortraitControlsActivity()
@@ -668,7 +645,7 @@ struct NowPlayingView: View {
     private func portraitPlaybackControls(width: CGFloat, allowsArtwork: Bool,
                                           metrics: ControlMetrics? = nil) -> some View {
         let controlsWidth = portraitControlsWidth(availableWidth: width)
-        return playbackControls(width: controlsWidth, animated: true, metrics: metrics, swipeToSkip: true) {
+        return playbackControls(width: controlsWidth, animated: true, metrics: metrics) {
             portraitUtilityBar(allowsArtwork: allowsArtwork)
         }
         .background {
