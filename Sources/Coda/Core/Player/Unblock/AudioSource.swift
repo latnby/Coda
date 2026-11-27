@@ -6,6 +6,7 @@ import Foundation
 enum AudioSourceID: String, CaseIterable, Hashable, Sendable {
     case mirror
     case parser
+    case lx
     case netease
     case qq
     case kugou
@@ -22,7 +23,7 @@ enum AudioSourceID: String, CaseIterable, Hashable, Sendable {
 
     var platform: MusicProvider? {
         switch self {
-        case .mirror, .parser: return nil
+        case .mirror, .parser, .lx: return nil
         case .netease: return .netease
         case .qq: return .qq
         case .kugou: return .kugou
@@ -33,6 +34,7 @@ enum AudioSourceID: String, CaseIterable, Hashable, Sendable {
     var displayName: String {
         switch self {
         case .mirror, .parser: return "备用音源"
+        case .lx: return "洛雪音源"
         default: return platform?.name ?? rawValue
         }
     }

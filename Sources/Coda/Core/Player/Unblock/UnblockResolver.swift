@@ -26,7 +26,7 @@ enum UnblockResolver {
 
     private static let log = Logger(subsystem: "wow.caicai.coda", category: "audio-source")
     private static let parallelSources: [any UnblockSource] = [
-        MirrorUnblockSource(), ParserUnblockSource(), NeteaseUnblockSource(), QQUnblockSource(), KugouUnblockSource(),
+        MirrorUnblockSource(), ParserUnblockSource(), LXUnblockSource(), NeteaseUnblockSource(), QQUnblockSource(), KugouUnblockSource(),
     ]
     private static let lastSource: any UnblockSource = QishuiUnblockSource()
 

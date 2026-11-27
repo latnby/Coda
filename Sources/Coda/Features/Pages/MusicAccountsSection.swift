@@ -8,10 +8,12 @@ final class MusicAccountsPresentation: ObservableObject {
     @Published var addingProvider: MusicProvider?
     @Published var errorMessage: String?
     @Published var pendingRemoval: MusicAccount?
+    @Published var showLXSources = false
 }
 
 struct MusicAccountsSection: View {
     @ObservedObject private var manager = MusicAccountManager.shared
+    @ObservedObject private var lxStore = LXSourceStore.shared
     @ObservedObject var presentation: MusicAccountsPresentation
 
     var body: some View {
@@ -22,6 +24,7 @@ struct MusicAccountsSection: View {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(manager.accounts) { item in accountCard(item) }
                     ForEach(guestProviders) { provider in guestCard(provider) }
+                    lxSourceCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -187,6 +190,48 @@ struct MusicAccountsSection: View {
         .accessibilityHint(isCurrent ? "正在以游客身份浏览" : "轻点以游客身份浏览")
     }
 
+    /// The fifth card: not an account but the LX source manager. Shows the
+    /// active source's name, or invites an import when there is none.
+    private var lxSourceCard: some View {
+        let active = lxStore.activeSource
+        return VStack(spacing: 8) {
+            ZStack {
+                Circle().fill(.quaternary.opacity(0.5))
+                Image(systemName: "puzzlepiece.extension.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(active != nil ? Theme.accent : .secondary)
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(active != nil ? Theme.accent : .clear, lineWidth: 2))
+            .overlay(alignment: .bottomTrailing) {
+                if active != nil {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.white, Theme.accent)
+                }
+            }
+            .padding(.top, 4)
+            Text(active?.name ?? "未导入").font(.subheadline.weight(.semibold)).lineLimit(1)
+            Text("洛雪音源").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(lxStore.sources.isEmpty ? "点按导入" : "已导入 \(lxStore.sources.count) 个")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.bottom, 4)
+        .padding(12)
+        .frame(width: 132)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.quaternary.opacity(active != nil ? 0.9 : 0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(active != nil ? Theme.accent.opacity(0.6) : .clear, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture { presentation.showLXSources = true }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("洛雪音源")
+        .accessibilityHint("轻点管理洛雪音源")
+    }
+
     /// The label spans the row so the whole row, not just its text, is tappable.
     private func actionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
@@ -287,6 +332,7 @@ struct MusicAccountsPresenter: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(item: $presentation.addingProvider) { LoginSheet(addingProvider: $0) }
+            .sheet(isPresented: $presentation.showLXSources) { LXSourcesView() }
             .alert("账号操作失败", isPresented: Binding(get: { presentation.errorMessage != nil }, set: { if !$0 { presentation.errorMessage = nil } })) {
                 Button("好", role: .cancel) { presentation.errorMessage = nil }
             } message: { Text(presentation.errorMessage ?? "") }
