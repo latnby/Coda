@@ -58,7 +58,11 @@ enum QQMusicAdditionalLogin {
             let data: Data
             do {
                 data = try await get(session, poll.url!, referer: "https://open.weixin.qq.com/")
-            } catch let error as URLError where error.code == .timedOut {
+            } catch let error as URLError where isTransient(error) {
+                // The long poll dies when the app is backgrounded mid-scan;
+                // the QR code itself is still valid, so keep waiting on it
+                // instead of failing the whole login.
+                try Task.checkCancellation()
                 continue
             }
             try Task.checkCancellation()
@@ -94,38 +98,84 @@ enum QQMusicAdditionalLogin {
         let ttl = max(10, min(data["expiresIn"] as? Int ?? 180, 180))
         let session = URLSession(configuration: .ephemeral, delegate: ProviderNoRedirectDelegate(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+        let deadline = Date().addingTimeInterval(TimeInterval(ttl))
         var path = "/ws/handshake"
-        for redirect in 0...3 {
-            let socket = session.webSocketTask(with: URL(string: "wss://mu.y.qq.com" + path)!, protocols: ["mqtt"])
-            socket.resume()
-            let reader = QQMusicQRSocket(socket: socket)
-            let timeout = Task {
-                try await Task.sleep(for: .seconds(ttl))
-                socket.cancel(with: .goingAway, reason: nil)
+        var redirects = 0
+        // The QR code (qrcodeID) stays valid until the deadline even when the
+        // socket dies — the app being backgrounded while the user confirms in
+        // the QQ Music app is the common cause — so a dropped connection
+        // reconnects on the SAME code instead of stranding the login.
+        while Date() < deadline {
+            switch try await musicAppAttempt(session: session, path: path, id: id, image: image,
+                                             deadline: deadline, onImage: onImage, onScanned: onScanned) {
+            case .credentials(let result):
+                return result
+            case .redirect(let ref):
+                redirects += 1
+                guard redirects <= 3 else { throw ProviderRequestError.network }
+                path = "/ws/handshake/" + ref
+            case .dropped:
+                try await Task.sleep(for: .seconds(1))
+                try Task.checkCancellation()
             }
-            defer {
-                timeout.cancel()
-                socket.cancel(with: .normalClosure, reason: nil)
-            }
-            let handshake = try await withTaskCancellationHandler {
+        }
+        throw expired
+    }
+
+    private enum MusicAppAttempt {
+        case credentials((credentials: [String: String], nickname: String))
+        case redirect(String)
+        case dropped
+    }
+
+    /// One connection attempt for the QQ Music App channel: handshake, then
+    /// listen until a terminal event. A dead connection is reported as
+    /// `.dropped` so the caller can reconnect on the same qrcodeID; real
+    /// login outcomes (success, cancel, timeout, protocol errors) throw or
+    /// return exactly as before.
+    private static func musicAppAttempt(session: URLSession, path: String, id: String, image: Data,
+                                        deadline: Date,
+                                        onImage: (Data) -> Void, onScanned: () -> Void) async throws -> MusicAppAttempt {
+        let socket = session.webSocketTask(with: URL(string: "wss://mu.y.qq.com" + path)!, protocols: ["mqtt"])
+        socket.resume()
+        let reader = QQMusicQRSocket(socket: socket)
+        let timeout = Task {
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        defer {
+            timeout.cancel()
+            socket.cancel(with: .normalClosure, reason: nil)
+        }
+        let handshake: QQMusicQRSocket.Packet
+        do {
+            handshake = try await withTaskCancellationHandler {
                 try await socket.send(.data(QQMusicQRSocket.connect(id)))
                 return try await reader.next()
             } onCancel: { socket.cancel(with: .goingAway, reason: nil) }
-            guard handshake.header >> 4 == 2, handshake.body.count >= 3 else {
-                throw ProviderRequestError.decoding("QQ Music MQTT handshake")
+        } catch let error as ProviderRequestError {
+            throw error
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if Date() >= deadline { throw expired }
+            if isConnectionDrop(error) { return .dropped }
+            throw error
+        }
+        guard handshake.header >> 4 == 2, handshake.body.count >= 3 else {
+            throw ProviderRequestError.decoding("QQ Music MQTT handshake")
+        }
+        let reason = handshake.body[1]
+        if reason != 0 {
+            let properties = try QQMusicQRSocket.properties(handshake.body, offset: 2)
+            guard [0x9c, 0x9d].contains(reason), let ref = properties.fields["serverReference"],
+                  ref.range(of: #"^[A-Za-z0-9._:-]+$"#, options: .regularExpression) != nil else {
+                throw ProviderRequestError.unknown("QQ 音乐 App 扫码连接被拒绝（\(reason)）")
             }
-            let reason = handshake.body[1]
-            if reason != 0 {
-                let properties = try QQMusicQRSocket.properties(handshake.body, offset: 2)
-                guard [0x9c, 0x9d].contains(reason), redirect < 3, let ref = properties.fields["serverReference"],
-                      ref.range(of: #"^[A-Za-z0-9._:-]+$"#, options: .regularExpression) != nil else {
-                    throw ProviderRequestError.unknown("QQ 音乐 App 扫码连接被拒绝（\(reason)）")
-                }
-                path = "/ws/handshake/" + ref
-                continue
-            }
-
-            return try await withTaskCancellationHandler {
+            return .redirect(ref)
+        }
+        do {
+            return .credentials(try await withTaskCancellationHandler {
                 try await socket.send(.data(QQMusicQRSocket.subscribe(id)))
                 let ping = Task {
                     while !Task.isCancelled {
@@ -165,9 +215,34 @@ enum QQMusicAdditionalLogin {
                     default: break
                     }
                 }
-            } onCancel: { socket.cancel(with: .goingAway, reason: nil) }
+            } onCancel: { socket.cancel(with: .goingAway, reason: nil) })
+        } catch let error as ProviderRequestError {
+            throw error
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if Date() >= deadline { throw expired }
+            if isConnectionDrop(error) { return .dropped }
+            throw error
         }
-        throw ProviderRequestError.network
+    }
+
+    /// Network failures that mean "the connection died", not "the login
+    /// failed" — the app being backgrounded mid-scan is the common cause.
+    private static func isConnectionDrop(_ error: Error) -> Bool {
+        if let urlError = error as? URLError { return isTransient(urlError) }
+        return (error as NSError).domain == NSPOSIXErrorDomain
+    }
+
+    private static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+             .internationalRoamingOff, .dataNotAllowed, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed,
+             .resourceUnavailable, .callIsActive, .cancelled:
+            return true
+        default:
+            return false
+        }
     }
 
     static func credentials(_ data: [String: Any], defaultLoginType: Int) throws -> (credentials: [String: String], nickname: String) {
