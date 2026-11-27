@@ -8,6 +8,7 @@ struct QishuiHomeView: View {
     @EnvironmentObject private var account: AccountStore
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var scenes = PanelResource<[QishuiListeningScene]>([])
+    @StateObject private var feedSongs = PanelResource<[Track]>([])
     @StateObject private var charts = HomeViewModel.qishui
     @ObservedObject private var discovery = HomeDiscoveryModel.shared
     #if os(macOS)
@@ -18,6 +19,7 @@ struct QishuiHomeView: View {
     var body: some View {
         ScenePreservingScrollView {
             LazyVStack(alignment: .leading, spacing: HomeLayout.sectionSpacing) {
+                recommendedSongs
                 listeningModes
                 HomeToplistsSection(model: charts, contentInset: layout.contentInset)
                 HomeDiscoverySections(model: discovery, songRows: false)
@@ -41,10 +43,51 @@ struct QishuiHomeView: View {
             guard account.offlineScope != nil else { return }
             #endif
             async let common: Void = loadScenes(force: force)
+            async let feed: Void = loadFeedSongs(force: force)
             async let rankings: Void = charts.load(loggedIn: account.isLoggedIn, force: force)
             await discovery.load(loggedIn: account.isLoggedIn, force: force)
-            _ = await (common, rankings)
+            _ = await (common, feed, rankings)
         }
+    }
+
+    /// The landing content is a song list, like Qishui itself: the default
+    /// recommendation feed's songs, in feed order. Tapping one starts the
+    /// feed queue at that song.
+    @ViewBuilder
+    private var recommendedSongs: some View {
+        if account.isLoggedIn, !feedSongs.value.isEmpty || feedSongs.isLoading {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "推荐歌曲")
+                    .frame(maxWidth: .infinity, minHeight: HomeLayout.headerHeight, alignment: .leading)
+                    .padding(.bottom, HomeLayout.headerSpacing)
+                if feedSongs.value.isEmpty {
+                    ProgressView("正在加载推荐歌曲")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                } else {
+                    ForEach(Array(feedSongs.value.prefix(20).enumerated()), id: \.element.id) { index, track in
+                        TrackRow(track: track, index: index) {
+                            playFeedSong(track)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, layout.contentInset)
+        }
+    }
+
+    private func loadFeedSongs(force: Bool) async {
+        guard account.isLoggedIn else { return }
+        await feedSongs.load(lifetime: 900, force: force) {
+            let state = QishuiMusicAPI.shared.feedState(.scene(QishuiListeningScene.defaultRecommendation))
+            let page = try await QishuiMusicAPI.shared.feedPage(state)
+            return try PlatformMusicAPI.shared.tracks(page.songs)
+        }
+    }
+
+    private func playFeedSong(_ track: Track) {
+        let state = QishuiMusicAPI.shared.feedState(.scene(QishuiListeningScene.defaultRecommendation))
+        PlayerService.shared.play(tracks: feedSongs.value, source: .qishuiFeed(state, playlistID: nil),
+                                  startAt: track)
     }
 
     /// Listening modes are personal feeds; the server rejects them without a session.
@@ -122,6 +165,10 @@ private struct QishuiSceneGrid: View {
                     }
                 }
             }
+            // Rebuild the lazy grid on every toggle: shrinking 48 tiles back
+            // to two rows inside an animated transaction can leave the lazy
+            // grid with no realized rows at all (a blank block).
+            .id(expanded)
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -132,10 +179,10 @@ private struct QishuiSceneGrid: View {
 
             if scenes.count > visibleCount {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { expanded.toggle() }
+                    expanded.toggle()
                 } label: {
                     HStack(spacing: 4) {
-                        Text(expanded ? "收起" : "展开全部 \(scenes.count) 个模式")
+                        Text(expanded ? "收起" : "展开")
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     }
                     .font(.subheadline.weight(.medium))
