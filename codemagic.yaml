@@ -1,0 +1,25 @@
+workflows:
+  ios-unsigned:
+    name: iOS unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build unsigned iOS IPA
+        script: |
+          VERSION="0.2.3"
+          BUILD_NUMBER="$(git rev-list --count HEAD)"
+          xcodebuild -workspace ios/CodaIOS.xcworkspace -scheme CodaIOS \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$CM_BUILD_DIR/ios-dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build
+          APP="$CM_BUILD_DIR/ios-dd/Build/Products/Release-iphoneos/CodaIOS.app"
+          mkdir -p "$CM_BUILD_DIR/payload/Payload" dist
+          cp -R "$APP" "$CM_BUILD_DIR/payload/Payload/"
+          (cd "$CM_BUILD_DIR/payload" && zip -qry "$CM_BUILD_DIR/dist/Coda-iOS-$VERSION.ipa" Payload)
+          ls -la dist/
+    artifacts:
+      - dist/*.ipa
