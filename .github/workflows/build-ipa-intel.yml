@@ -1,0 +1,43 @@
+name: Build unsigned iOS IPA (intel pool)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26 if present
+        run: |
+          ls /Applications | grep -i xcode || true
+          XC="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+
+      - name: Build unsigned iOS IPA
+        run: |
+          VERSION="0.2.3"
+          BUILD_NUMBER="$(git rev-list --count HEAD)"
+          xcodebuild -workspace ios/CodaIOS.xcworkspace -scheme CodaIOS \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build
+          APP="$RUNNER_TEMP/ios-dd/Build/Products/Release-iphoneos/CodaIOS.app"
+          mkdir -p "$RUNNER_TEMP/payload/Payload" dist
+          cp -R "$APP" "$RUNNER_TEMP/payload/Payload/"
+          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/dist/Coda-iOS-$VERSION.ipa" Payload)
+          ls -la dist/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coda-iOS-unsigned
+          path: dist/*.ipa
