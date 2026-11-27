@@ -301,6 +301,7 @@ final class LXRuntime: @unchecked Sendable {
         let input = Data(data.utf8)
         let isECB = mode.lowercased().contains("ecb")
         var out = Data(count: input.count + kCCBlockSizeAES128)
+        let outCapacity = out.count
         var outLength = 0
         let status = out.withUnsafeMutableBytes { outPtr in
             input.withUnsafeBytes { inPtr in
@@ -310,7 +311,7 @@ final class LXRuntime: @unchecked Sendable {
                             keyPtr.baseAddress, keyData.count,
                             isECB ? nil : (iv.isEmpty ? nil : iv),
                             inPtr.baseAddress, input.count,
-                            outPtr.baseAddress, out.count, &outLength)
+                            outPtr.baseAddress, outCapacity, &outLength)
                 }
             }
         }
