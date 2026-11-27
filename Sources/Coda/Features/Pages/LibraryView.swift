@@ -511,8 +511,8 @@ private struct ProfileIslandHero<Actions: View>: View {
     let subtitle: String
     let metadataText: String
     @ViewBuilder var actions: () -> Actions
-    private var phoneLayout = PhonePageLayout()
-    private let avatarSize: CGFloat = 120
+    var phoneLayout = PhonePageLayout()
+    let avatarSize: CGFloat = 120
 
     var body: some View {
         VStack(spacing: 0) {
