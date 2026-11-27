@@ -1490,6 +1490,7 @@ struct NowPlayingTrackMoreMenu: View {
     var onAddToPlaylist: (() -> Void)? = nil
     var onOpenDestination: ((Destination) -> Void)? = nil
     @EnvironmentObject private var account: AccountStore
+    @State private var showAggregateAdd = false
 
     #if os(macOS)
     @EnvironmentObject private var settings: SettingsManager
@@ -1546,6 +1547,9 @@ struct NowPlayingTrackMoreMenu: View {
         .contentShape(Rectangle())
         .accessibilityLabel("更多操作")
         .accessibilityIdentifier(accessibilityID)
+        .sheet(isPresented: $showAggregateAdd) {
+            AggregateAddSheet(track: track)
+        }
         #endif
     }
 
@@ -1573,6 +1577,7 @@ struct NowPlayingTrackMoreMenu: View {
             Divider()
         }
         LyricsSourceMenu()
+        Label("音乐来源：\(track.aggregateSourceName)", systemImage: "dot.radiowaves.left.and.right")
         if showsLyricsAdjustment {
             lyricsTimingControls
         }
@@ -1592,6 +1597,11 @@ struct NowPlayingTrackMoreMenu: View {
                 Button(artist.name) { onOpenDestination?(.artist(artist.id)) }
             }
         } label: { Label("前往歌手", systemImage: "music.mic") }
+        Button {
+            showAggregateAdd = true
+        } label: {
+            Label("添加到聚合歌单", systemImage: "text.badge.plus")
+        }
         Divider()
         if let url = track.musicShareURL {
             ShareLink(item: url) { Label("分享", systemImage: "square.and.arrow.up") }
@@ -1622,11 +1632,17 @@ struct NowPlayingTrackMoreMenu: View {
 
         Divider()
         LyricsSourceMenu()
+        Label("音乐来源：\(track.aggregateSourceName)", systemImage: "dot.radiowaves.left.and.right")
         if showsLyricsAdjustment {
             lyricsTimingControls
         }
 
         Divider()
+        Button {
+            showAggregateAdd = true
+        } label: {
+            Label("添加到聚合歌单", systemImage: "text.badge.plus")
+        }
         TrackDownloadActions(track: track, showsIcons: true)
     }
 

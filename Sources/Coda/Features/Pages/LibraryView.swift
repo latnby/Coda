@@ -180,6 +180,7 @@ struct LibraryView: View {
                     }
                 }
             }
+            AggregatePlaylistSection()
             PlayerClearanceSpacer()
         }
     }

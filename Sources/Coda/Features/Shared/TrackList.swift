@@ -88,6 +88,7 @@ struct TrackRow: View {
     #if os(iOS)
     @State private var addToPlaylistTrack: Track?
     #endif
+    @State private var aggregateAddTrack: Track?
     @State private var reducingRecommendationIDs: Set<Int> = []
     /// Only this track's download state, so another row's transfer cannot
     /// re-evaluate this body four times a second.
@@ -237,8 +238,12 @@ struct TrackRow: View {
             AddToPlaylistSheet(track: selectedTrack)
         }
         #endif
+        .sheet(item: $aggregateAddTrack) { selectedTrack in
+            AggregateAddSheet(track: selectedTrack)
+        }
         .onChange(of: track.id) { _ in
             hoveredTrackID = nil
+            aggregateAddTrack = nil
             #if os(iOS)
             addToPlaylistTrack = nil
             #endif
@@ -489,6 +494,9 @@ struct TrackRow: View {
             addToPlaylistTrack = track
             #endif
         }
+        }
+        Button("添加到聚合歌单") {
+            aggregateAddTrack = track
         }
         if let onDeleteFromCloud {
             Button("从云盘中删除", role: .destructive) { onDeleteFromCloud(track) }
