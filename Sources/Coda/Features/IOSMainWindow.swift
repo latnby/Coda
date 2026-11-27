@@ -813,6 +813,7 @@ public struct IOSMainWindow: View {
     }
 
     @State private var selectedTab: IOSTab = .home
+    @State private var didPresentPlayerOnLaunch = false
 
     @State private var showLogin = false
     @State private var homePath: [Destination] = []
@@ -847,6 +848,7 @@ public struct IOSMainWindow: View {
             .task {
                 await DownloadManager.shared.start()
                 await account.bootstrap()
+                presentPlayerOnLaunch()
                 if settings.autoCheckUpdates {
                     IOSUpdater.shared.check(interactive: false)
                 }
@@ -1078,6 +1080,21 @@ public struct IOSMainWindow: View {
         case .home: homePath = []
         case .search: searchPath = []
         case .library: libraryPath = []
+        }
+    }
+
+    /// Qishui-style front door: the first page after launch is the playing
+    /// page itself. With a restored track it simply opens on it; on Qishui
+    /// with nothing restored it starts the recommendation feed first. The
+    /// player's back button returns to the tabs underneath. Runs once.
+    private func presentPlayerOnLaunch() {
+        guard !didPresentPlayerOnLaunch else { return }
+        didPresentPlayerOnLaunch = true
+        if player.currentTrack != nil {
+            player.showNowPlaying = true
+        } else if account.provider == .qishui, account.isLoggedIn {
+            player.playQishuiScene(QishuiListeningScene.defaultRecommendation)
+            player.showNowPlaying = true
         }
     }
 
