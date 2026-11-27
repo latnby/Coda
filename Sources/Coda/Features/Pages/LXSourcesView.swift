@@ -14,6 +14,8 @@ struct LXSourcesView: View {
     @State private var importURLText = ""
     @State private var importError: String?
     @State private var isImporting = false
+    @State private var testResults: [LXTestOutcome] = []
+    @State private var isTesting = false
 
     var body: some View {
         NavigationStack {
@@ -69,6 +71,35 @@ struct LXSourcesView: View {
                         Label("从剪贴板导入", systemImage: "doc.on.clipboard")
                     }
                     if isImporting { ProgressView("正在导入…") }
+                }
+
+                if store.activeSource != nil {
+                    Section {
+                        Button {
+                            Task { await runTest() }
+                        } label: {
+                            Label("测试当前音源", systemImage: "checkmark.seal")
+                        }
+                        .disabled(isTesting)
+                        if isTesting { ProgressView("正在逐个平台取链…") }
+                        ForEach(testResults) { result in
+                            HStack(spacing: 10) {
+                                Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result.ok ? .green : .red)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(result.platform)
+                                    Text(result.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("音源测试")
+                    } footer: {
+                        Text("用周杰伦《晴天》在每个平台真实取一次链，成功会显示链接来自哪个域名。酷我、咪咕、汽水因为软件里没有对应平台的搜索接口，暂时测不了。")
+                    }
                 }
 
                 Section {
@@ -203,6 +234,81 @@ struct LXSourcesView: View {
             importError = error.localizedDescription
         }
     }
+
+    // MARK: - Source self-test
+
+    /// Runs one real lookup per testable platform, through the same song
+    /// matching the unblocker uses, so a green row means the source would
+    /// also answer during playback.
+    private func runTest() async {
+        guard let runtime = store.activeRuntime() else { return }
+        isTesting = true
+        testResults = []
+        let query = UnblockQuery(origin: .qishui, title: "晴天", artists: ["周杰伦"],
+                                 album: "叶惠美", durationMS: 269_000)
+        for code in ["tx", "wy", "kg"] {
+            guard runtime.declaredSources[code]?.actions.contains("musicUrl") == true else { continue }
+            testResults.append(await testPlatform(code: code, runtime: runtime, query: query))
+        }
+        if testResults.isEmpty {
+            testResults.append(LXTestOutcome(platform: "测试", ok: false,
+                                             detail: "当前音源没有声明可测试的平台"))
+        }
+        isTesting = false
+    }
+
+    private func testPlatform(code: String, runtime: LXRuntime, query: UnblockQuery) async -> LXTestOutcome {
+        let name = runtime.declaredSources[code]?.name ?? code
+        do {
+            var info: [String: Any] = [
+                "name": query.title,
+                "singer": query.artists.joined(separator: "、"),
+                "source": code,
+                "albumName": query.album,
+            ]
+            switch code {
+            case "tx":
+                let api = await UnblockSessionPool.shared.qqAPI()
+                let song = try await UnblockMatchCache.shared.song(.qq, query) {
+                    try await api.searchSongs(keyword: query.keyword, limit: 10)
+                }
+                guard let mid = song?.qqMid, !mid.isEmpty else {
+                    return LXTestOutcome(platform: name, ok: false, detail: "没找到测试歌曲")
+                }
+                info["songmid"] = mid
+                info["id"] = mid
+            case "wy":
+                guard let songID = try await NeteaseSongLookup.shared.songID(for: query) else {
+                    return LXTestOutcome(platform: name, ok: false, detail: "没找到测试歌曲")
+                }
+                info["id"] = songID
+            case "kg":
+                let api = await UnblockSessionPool.shared.kugouAPI()
+                let song = try await UnblockMatchCache.shared.song(.kugou, query) {
+                    try await api.searchSongs(keyword: query.keyword, limit: 10)
+                }
+                guard let hash = song?.kugouHash, !hash.isEmpty else {
+                    return LXTestOutcome(platform: name, ok: false, detail: "没找到测试歌曲")
+                }
+                info["hash"] = hash
+            default:
+                return LXTestOutcome(platform: name, ok: false, detail: "暂不支持测试此平台")
+            }
+            let url = try await runtime.musicURL(source: code, musicInfo: info, type: "320k")
+            let host = URL(string: url)?.host ?? url
+            return LXTestOutcome(platform: name, ok: true, detail: "取链成功，链接来自 \(host)")
+        } catch {
+            return LXTestOutcome(platform: name, ok: false, detail: error.localizedDescription)
+        }
+    }
+}
+
+/// One row of the source self-test.
+private struct LXTestOutcome: Identifiable {
+    let id = UUID()
+    let platform: String
+    let ok: Bool
+    let detail: String
 }
 
 #if os(iOS)
