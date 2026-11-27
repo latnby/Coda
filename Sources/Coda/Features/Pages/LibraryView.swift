@@ -10,9 +10,6 @@ struct LibraryView: View {
     @State private var showNewPlaylist = false
     @State private var newPlaylistName = ""
     @StateObject private var profileDetail = PanelResource<NeteaseAPI.UserDetailResponse?>(nil)
-    /// Global frame of the profile hero's avatar slot, reported by the hero
-    /// itself; the Dynamic Island dock overlay follows it while scrolling.
-    @State private var profileAvatarFrame: CGRect = .zero
 
     var phoneLayout = PhonePageLayout()
     private var isPhone: Bool { phoneLayout.isEnabled }
@@ -96,22 +93,24 @@ struct LibraryView: View {
     }
 
     private var phonePage: some View {
-        ZStack(alignment: .top) {
         ProfileDetailPage() {
             if account.provider.supports(.accountSync) { SyncedLoginButtons() }
             if let profile = account.profile {
-                ProfileIslandHero(
+                PlaylistDetailHero(
                     artworkURL: profile.avatarUrl,
                     title: profile.nickname,
                     subtitle: profileSubtitle,
-                    metadataText: profileMetadata
+                    avatarURL: nil,
+                    metadataText: profileMetadata,
+                    circularArtwork: true, showsAvatar: false
                 ) {
                     profileActions
                 }
             } else {
-                ProfileIslandHero(artworkURL: nil, title: String(localized: "我的"),
-                                        subtitle: String(localized: "登录\(account.provider.name)"),
-                                        metadataText: String(localized: "同步我喜欢的音乐、歌单与收藏")) {
+                PlaylistDetailHero(artworkURL: nil, title: String(localized: "我的"),
+                                        subtitle: String(localized: "登录\(account.provider.name)"), avatarURL: nil,
+                                        metadataText: String(localized: "同步我喜欢的音乐、歌单与收藏"),
+                                        circularArtwork: true, showsAvatar: false) {
                     VStack(spacing: 16) {
                         Button("登录\(account.provider.name)") { showLogin = true }
                         profileActions
@@ -183,9 +182,6 @@ struct LibraryView: View {
             }
             PlayerClearanceSpacer()
         }
-        ProfileIslandDockOverlay(avatarURL: account.profile?.avatarUrl, avatarFrame: profileAvatarFrame)
-        }
-        .onPreferenceChange(ProfileAvatarFrameKey.self) { profileAvatarFrame = $0 }
     }
 
     private var profileSubtitle: String {
@@ -491,150 +487,4 @@ struct LibraryView: View {
         } else { Text(account.provider.name) }
     }
 
-}
-
-/// Global frame of the profile hero's avatar slot, published by
-/// `ProfileIslandHero` and consumed by the island dock overlay.
-private struct ProfileAvatarFrameKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
-/// Compact profile header for the phone library page. The avatar itself is
-/// NOT drawn here: this header only reserves its slot and reports the slot's
-/// global frame, while `ProfileIslandDockOverlay` renders the avatar above
-/// the page so scrolling can carry it into the Dynamic Island. At 120pt the
-/// header stays balanced instead of being dominated by a giant avatar.
-private struct ProfileIslandHero<Actions: View>: View {
-    let artworkURL: String?
-    let title: String
-    let subtitle: String
-    let metadataText: String
-    @ViewBuilder var actions: () -> Actions
-    var phoneLayout = PhonePageLayout()
-    let avatarSize: CGFloat = 120
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Color.clear
-                .frame(width: avatarSize, height: avatarSize)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: ProfileAvatarFrameKey.self,
-                                               value: geometry.frame(in: .global))
-                    }
-                }
-
-            Text(title)
-                .font(Theme.Typography.detailTitle)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.top, Theme.Spacing.page)
-                .padding(.horizontal, phoneLayout.contentInset)
-
-            Text(subtitle)
-                .font(Theme.Typography.secondary)
-                .lineLimit(1)
-                .padding(.top, Theme.Spacing.small)
-                .padding(.horizontal, phoneLayout.contentInset)
-
-            Text(metadataText)
-                .font(Theme.Typography.secondary.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .padding(.top, Theme.Spacing.small)
-                .padding(.horizontal, phoneLayout.contentInset)
-
-            actions()
-                .padding(.top, Theme.Spacing.component)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, Theme.Spacing.section)
-        .padding(.bottom, Theme.Spacing.section)
-    }
-}
-
-/// Renders the profile avatar above the library page and docks it into the
-/// Dynamic Island while the page scrolls — the Telegram settings effect.
-/// The island itself is hardware and cannot be drawn by an app; the trick
-/// is a black pill rendered exactly over it that stretches down to meet the
-/// approaching avatar, so the two blacks read as one morphing shape. At
-/// rest the avatar sits precisely in the hero's slot and follows scrolling
-/// one-to-one; near the top it eases into the island and stays there until
-/// the page scrolls back. Inert on devices without a Dynamic Island.
-private struct ProfileIslandDockOverlay: View {
-    let avatarURL: String?
-    let avatarFrame: CGRect
-
-    /// The island's frame in window coordinates, or nil when this device
-    /// has no Dynamic Island (those report a ~47pt top safe area instead
-    /// of ~59pt) or is not a phone.
-    private var islandRect: CGRect? {
-        guard UIDevice.current.userInterfaceIdiom == .phone,
-              let window = UIApplication.shared.connectedScenes
-                  .compactMap({ $0 as? UIWindowScene }).first?.keyWindow,
-              window.safeAreaInsets.top >= 50 else { return nil }
-        let width: CGFloat = 126
-        let height: CGFloat = 37
-        return CGRect(x: (window.bounds.width - width) / 2, y: 11, width: width, height: height)
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            if let island = islandRect, avatarFrame.width > 0 {
-                let origin = proxy.frame(in: .global).origin
-                let current = CGPoint(x: avatarFrame.midX, y: avatarFrame.midY)
-                let target = CGPoint(x: island.midX, y: island.midY)
-                // Docking begins when the rising avatar is 150pt of travel
-                // away from the island's center.
-                let startY = target.y + 150
-                let raw = min(1, max(0, (startY - current.y) / (startY - target.y)))
-                let eased = raw * raw * (3 - 2 * raw)
-                let center = CGPoint(x: current.x + (target.x - current.x) * eased,
-                                     y: current.y + (target.y - current.y) * eased)
-                let size = avatarFrame.width + (island.height - avatarFrame.width) * eased
-                let avatarRect = CGRect(x: center.x - size / 2, y: center.y - size / 2,
-                                        width: size, height: size)
-                // The pill is the union of the island and the travelling
-                // avatar, pulled tight as docking completes so at rest it
-                // coincides with the hardware island exactly.
-                let grow = 5 * (1 - raw)
-                let pill = island.union(avatarRect).insetBy(dx: -grow, dy: -grow)
-
-                ZStack {
-                    if raw > 0 {
-                        RoundedRectangle(cornerRadius: pill.height / 2, style: .continuous)
-                            .fill(Color.black)
-                            .frame(width: pill.width, height: pill.height)
-                            .position(x: pill.midX - origin.x, y: pill.midY - origin.y)
-                            .opacity(min(1, raw / 0.12))
-                    }
-                    avatar
-                        .frame(width: size, height: size)
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.18 * (1 - eased)), radius: 18, y: 10)
-                        .position(x: center.x - origin.x, y: center.y - origin.y)
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private var avatar: some View {
-        if let avatarURL {
-            CachedAsyncImage(url: avatarURL.resizedImageURL(384), animated: false)
-        } else {
-            ZStack {
-                Circle().fill(Color(uiColor: .secondarySystemBackground))
-                Image(systemName: "person.crop.circle.fill")
-                    .resizable()
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
 }
