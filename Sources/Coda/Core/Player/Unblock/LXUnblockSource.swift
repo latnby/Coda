@@ -70,9 +70,10 @@ struct LXUnblockSource: UnblockSource {
         switch attempt.platform {
         case .qq:
             let api = await UnblockSessionPool.shared.qqAPI()
-            guard let song = try await UnblockMatchCache.shared.song(.qq, query) {
+            let song = try await UnblockMatchCache.shared.song(.qq, query) {
                 try await api.searchSongs(keyword: query.keyword, limit: 10)
-            }, let mid = song.qqMid, !mid.isEmpty else { return nil }
+            }
+            guard let mid = song?.qqMid, !mid.isEmpty else { return nil }
             info["songmid"] = mid
             info["id"] = mid
         case .netease:
@@ -80,9 +81,10 @@ struct LXUnblockSource: UnblockSource {
             info["id"] = songID
         case .kugou:
             let api = await UnblockSessionPool.shared.kugouAPI()
-            guard let song = try await UnblockMatchCache.shared.song(.kugou, query) {
+            let song = try await UnblockMatchCache.shared.song(.kugou, query) {
                 try await api.searchSongs(keyword: query.keyword, limit: 10)
-            }, let hash = song.kugouHash, !hash.isEmpty else { return nil }
+            }
+            guard let hash = song?.kugouHash, !hash.isEmpty else { return nil }
             info["hash"] = hash
         case .qishui:
             return nil
