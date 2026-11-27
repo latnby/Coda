@@ -1278,7 +1278,7 @@ struct LyricMainText: View {
         // frame karaoke drawing is an overlay and cannot resize the scroll rows.
         LyricText(
             line: line, size: size, weight: weight,
-            color: .white.opacity(isActive ? 1 : (verbatim ? min(inactiveOpacity, 0.25) : inactiveOpacity))
+            color: .white.opacity(isActive ? 1 : (verbatim ? min(inactiveOpacity, 0.85) : inactiveOpacity))
         )
         .opacity(karaoke ? 0 : 1)
         .overlay(alignment: .topLeading) {

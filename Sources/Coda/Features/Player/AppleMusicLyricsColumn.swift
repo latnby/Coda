@@ -708,13 +708,16 @@ private struct AppleMusicLyricRow: View, Equatable {
 
     private var opacity: Double {
         if isActive || isSeekTarget { return 1 }
-        if isBrowsing || contrast == .increased { return 0.72 }
-        return distance < 0 ? 0.30 : max(0.30, 0.58 - Double(abs(distance)) * 0.055)
+        if isBrowsing || contrast == .increased { return 0.8 }
+        // The floors stay high enough to read on bright covers: white at
+        // 0.30 over a lime artwork washes out to nothing. The distance
+        // falloff still gives the depth fade Lon likes on dark covers.
+        return distance < 0 ? 0.45 : max(0.45, 0.62 - Double(abs(distance)) * 0.04)
     }
 
     private var blur: CGFloat {
         guard !isActive, !isSeekTarget, !isBrowsing, contrast != .increased else { return 0 }
-        return min(3.5, CGFloat(abs(distance)) * 0.65)
+        return min(2.4, CGFloat(abs(distance)) * 0.5)
     }
 
     private var annotationFont: Font {
@@ -729,7 +732,7 @@ private struct AppleMusicLyricRow: View, Equatable {
     }
 
     private var annotationColor: Color {
-        .white.opacity(isActive ? 0.76 : 0.25)
+        .white.opacity(isActive ? 0.76 : 0.55)
     }
 
     @ViewBuilder
