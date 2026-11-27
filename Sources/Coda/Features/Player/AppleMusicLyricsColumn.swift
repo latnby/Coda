@@ -717,7 +717,7 @@ private struct AppleMusicLyricRow: View, Equatable {
 
     private var blur: CGFloat {
         guard !isActive, !isSeekTarget, !isBrowsing, contrast != .increased else { return 0 }
-        return min(2.4, CGFloat(abs(distance)) * 0.5)
+        return min(3.5, CGFloat(abs(distance)) * 0.65)
     }
 
     private var annotationFont: Font {
