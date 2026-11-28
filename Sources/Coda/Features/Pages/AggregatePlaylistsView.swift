@@ -192,6 +192,20 @@ struct AggregatePlaylistDetailView: View {
 
     private var moreMenu: some View {
         Menu {
+            if let playlist {
+                let tracks = filteredTracks(playlist)
+                Button {
+                    playAll(tracks)
+                } label: {
+                    Label("顺序播放", systemImage: "arrow.down.to.line")
+                }
+                Button {
+                    playAll(Array(tracks.reversed()))
+                } label: {
+                    Label("倒序播放", systemImage: "arrow.up.to.line")
+                }
+                Divider()
+            }
             Picker("排序方式", selection: $sortOrder) {
                 ForEach(PlaylistTrackSort.allCases, id: \.self) { sort in
                     Text(sort.rawValue).tag(sort)

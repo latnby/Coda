@@ -16,6 +16,11 @@ struct SwipeMusicView: View {
     @Environment(\.activeIOSTab) private var activeTab
     @ObservedObject private var model = SwipeFeedModel.shared
     @State private var currentID: Int?
+    /// The category bar's bottom edge in screen coordinates, measured
+    /// from the bar itself — pages inset their artwork by this much
+    /// (plus a gap), so the square can never slide under the chips on
+    /// any device. (A percentage-of-height guess did exactly that.)
+    @State private var categoryBarBottom: CGFloat = 120
 
     /// The feed is live exactly when the player's queue is the feed's.
     /// The play source is the single source of truth: anything else the
@@ -36,6 +41,7 @@ struct SwipeMusicView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .onPreferenceChange(SwipeCategoryBarBottomKey.self) { categoryBarBottom = $0 }
         .task(id: feedKey) {
             await model.start(provider: account.provider, scope: feedKey)
             if !model.tracks.contains(where: { $0.id == currentID }) {
@@ -154,7 +160,7 @@ struct SwipeMusicView: View {
             LazyVStack(spacing: 0) {
                 ForEach(model.tracks) { track in
                     SwipePage(track: track, isCurrent: track.id == currentID,
-                              isPlayingThisFeed: feedLive,
+                              isPlayingThisFeed: feedLive, topInset: categoryBarBottom,
                               onPlayRequest: { beginPlayback(from: track) })
                         .containerRelativeFrame(.vertical)
                         .id(track.id)
@@ -202,6 +208,12 @@ struct SwipeMusicView: View {
             .padding(.horizontal, 16)
         }
         .padding(.top, 6)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: SwipeCategoryBarBottomKey.self,
+                                       value: proxy.frame(in: .global).maxY)
+            }
+        }
     }
 
     private var loginPrompt: some View {
@@ -224,6 +236,13 @@ struct SwipeMusicView: View {
     }
 }
 
+private struct SwipeCategoryBarBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// One full-screen song page. The layout follows the reference Lon
 /// picked from Qishui: a big rounded square (about 91% of the screen
 /// width) over a blurred-cover backdrop, sitting clear of the category
@@ -237,6 +256,8 @@ private struct SwipePage: View {
     let track: Track
     let isCurrent: Bool
     let isPlayingThisFeed: Bool
+    /// Global Y of the category bar's bottom edge (see SwipeMusicView).
+    let topInset: CGFloat
     let onPlayRequest: () -> Void
     @EnvironmentObject private var player: PlayerService
     @Environment(\.colorScheme) private var colorScheme
@@ -245,7 +266,11 @@ private struct SwipePage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let big = min(geo.size.width * 0.91, geo.size.height * 0.46)
+            // Start the content a clear gap below the category bar's
+            // measured bottom edge, and cap the square by the height
+            // actually left under it, so nothing is pushed off-screen.
+            let topPad = max(0, topInset - geo.frame(in: .global).minY) + 14
+            let big = max(100, min(geo.size.width * 0.91, geo.size.height - topPad - 270))
             ZStack {
                 backdrop
                 VStack(alignment: .center, spacing: 0) {
@@ -255,7 +280,7 @@ private struct SwipePage: View {
                             .frame(width: big, height: big)
                             .padding(.top, 16)
                     } else {
-                        titleBlock
+                        titleBlock(big: big)
                             .padding(.top, 18)
                     }
                     controlsRow
@@ -265,7 +290,7 @@ private struct SwipePage: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, geo.size.height * 0.15)
+                .padding(.top, topPad)
                 .padding(.bottom, 118)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -297,10 +322,14 @@ private struct SwipePage: View {
 
     // MARK: - Header (artwork + compact titles in lyrics mode)
 
+    @ViewBuilder
     private func headerRow(big: CGFloat) -> some View {
-        HStack(spacing: 12) {
-            artwork(size: showLyrics ? 54 : big)
-            if showLyrics {
+        if showLyrics {
+            // Hard width bound: without it the title takes its full
+            // ideal width, the row outgrows the screen and its left
+            // half (thumbnail included) lands off-screen.
+            HStack(spacing: 12) {
+                artwork(size: 54)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track.name)
                         .font(.headline)
@@ -310,9 +339,12 @@ private struct SwipePage: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(width: big, alignment: .leading)
+        } else {
+            artwork(size: big)
         }
-        .frame(maxWidth: .infinity, alignment: showLyrics ? .leading : .center)
     }
 
     private func artwork(size: CGFloat) -> some View {
@@ -363,7 +395,7 @@ private struct SwipePage: View {
 
     // MARK: - Titles and controls
 
-    private var titleBlock: some View {
+    private func titleBlock(big: CGFloat) -> some View {
         VStack(spacing: 5) {
             Text(track.name)
                 .font(.title3.weight(.semibold))
@@ -374,7 +406,7 @@ private struct SwipePage: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: big)
     }
 
     private var controlsRow: some View {
