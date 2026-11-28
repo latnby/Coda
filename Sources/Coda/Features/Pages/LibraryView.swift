@@ -102,7 +102,7 @@ struct LibraryView: View {
                     subtitle: profileSubtitle,
                     avatarURL: nil,
                     metadataText: profileMetadata,
-                    circularArtwork: true, showsAvatar: false
+                    circularArtwork: true, showsAvatar: false, artworkScale: 0.5
                 ) {
                     profileActions
                 }
@@ -110,7 +110,7 @@ struct LibraryView: View {
                 PlaylistDetailHero(artworkURL: nil, title: String(localized: "我的"),
                                         subtitle: String(localized: "登录\(account.provider.name)"), avatarURL: nil,
                                         metadataText: String(localized: "同步我喜欢的音乐、歌单与收藏"),
-                                        circularArtwork: true, showsAvatar: false) {
+                                        circularArtwork: true, showsAvatar: false, artworkScale: 0.5) {
                     VStack(spacing: 16) {
                         Button("登录\(account.provider.name)") { showLogin = true }
                         profileActions

@@ -80,6 +80,10 @@ struct PlaylistDetailHero<Actions: View>: View {
     var circularArtwork = false
     var showsAvatar = true
     var isLoading = false
+    /// Scales the hero artwork (the profile header passes 0.5: the avatar
+    /// circle's diameter halves — at full size it is 68% of the page
+    /// width, a cover's presence, not a profile picture's).
+    var artworkScale: CGFloat = 1
     @ViewBuilder var actions: () -> Actions
 
     @State private var availableWidth: CGFloat = 320
@@ -92,7 +96,8 @@ struct PlaylistDetailHero<Actions: View>: View {
             IPadDetailHeader(artworkURL: artworkURL, title: title,
                                  subtitle: subtitle, avatarURL: avatarURL,
                                  metadataText: metadataText, circularArtwork: circularArtwork,
-                                 showsAvatar: showsAvatar, isLoading: isLoading, actions: actions)
+                                 showsAvatar: showsAvatar, isLoading: isLoading,
+                                 artworkScale: artworkScale, actions: actions)
         } else {
             phoneHero
         }
@@ -177,7 +182,7 @@ struct PlaylistDetailHero<Actions: View>: View {
     }
 
     private var artwork: some View {
-        let size = min(availableWidth * 0.68, 300)
+        let size = min(availableWidth * 0.68, 300) * artworkScale
         return Group {
             if isLoading {
                 // Size the skeleton itself, independently of an empty image's proposal.
@@ -202,6 +207,7 @@ private struct IPadDetailHeader<Actions: View>: View {
     let metadataText: String
     var circularArtwork = false
     var showsAvatar = true
+    var artworkScale: CGFloat = 1
     var searchText: Binding<String>? = nil
     var searchFocused: Binding<Bool>? = nil
     var searchPlaceholder: String = String(localized: "在歌单中搜索")
@@ -210,7 +216,7 @@ private struct IPadDetailHeader<Actions: View>: View {
 
     var body: some View {
         MusicLibraryHeaderLayout(title: title, icon: nil, coverURL: artworkURL,
-                                 circularCover: circularArtwork, isLoading: isLoading, usesPlaylistActions: true,
+                                 circularCover: circularArtwork, artworkScale: artworkScale, isLoading: isLoading, usesPlaylistActions: true,
                                  searchText: searchText, searchFocused: searchFocused,
                                  searchPlaceholder: searchPlaceholder) {
             EmptyView()
