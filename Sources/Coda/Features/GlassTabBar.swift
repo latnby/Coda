@@ -1,16 +1,31 @@
 import SwiftUI
 
 enum IOSTab: Hashable {
-    case home, search, library
+    case home, swipe, search, library
 }
 
 extension IOSTab {
     /// Bottom navigation order shared by iPhone and compact windows.
     static let barItems: [GlassTabBar.Item] = [
         .init(tab: .home, title: "推荐", icon: "house"),
+        .init(tab: .swipe, title: "刷歌", icon: "waveform"),
         .init(tab: .search, title: "探索", icon: "magnifyingglass"),
         .init(tab: .library, title: "我的", icon: "person.crop.circle"),
     ]
+}
+
+private struct ActiveIOSTabKey: EnvironmentKey {
+    static let defaultValue: IOSTab = .home
+}
+
+extension EnvironmentValues {
+    /// Which main tab is on screen. Pages that exist off-screen in the
+    /// legacy tab layout (all pages are in the hierarchy, behind opacity)
+    /// use this to tell "loaded" from "actually being looked at".
+    var activeIOSTab: IOSTab {
+        get { self[ActiveIOSTabKey.self] }
+        set { self[ActiveIOSTabKey.self] = newValue }
+    }
 }
 
 private struct CompactWindowLayoutKey: EnvironmentKey {

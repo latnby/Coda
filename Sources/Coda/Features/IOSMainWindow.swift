@@ -817,6 +817,7 @@ public struct IOSMainWindow: View {
 
     @State private var showLogin = false
     @State private var homePath: [Destination] = []
+    @State private var swipePath: [Destination] = []
     @State private var searchPath: [Destination] = []
     @State private var libraryPath: [Destination] = []
     @State private var iPadPath: [Destination] = []
@@ -831,7 +832,7 @@ public struct IOSMainWindow: View {
             .environmentObject(player)
             .environmentObject(account)
         .onChange(of: account.sessionRevision) { _ in
-            homePath = []; searchPath = []; libraryPath = []; iPadPath = []
+            homePath = []; swipePath = []; searchPath = []; libraryPath = []; iPadPath = []
         }
             .environmentObject(settings)
             .environmentObject(toasts)
@@ -1021,6 +1022,7 @@ public struct IOSMainWindow: View {
                 .environmentObject(account)
                 .environmentObject(settings)
         }
+        .environment(\.activeIOSTab, selectedTab)
         .modifier(NowPlayingLoginPresenter())
         // The cover sits above the root overlay, so it shows toasts itself.
         .modifier(ToastOverlay())
@@ -1056,6 +1058,9 @@ public struct IOSMainWindow: View {
             Tab("推荐", systemImage: "house", value: .home) {
                 tabStack(.home) { HomeView() }
             }
+            Tab("刷歌", systemImage: "waveform", value: .swipe) {
+                tabStack(.swipe) { SwipeMusicView() }
+            }
             // A regular tab: the search field lives in the page, not the bar,
             // and the 精选 playlist shelves sit under it.
             Tab("探索", systemImage: "magnifyingglass", value: .search) {
@@ -1072,6 +1077,7 @@ public struct IOSMainWindow: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 page(.home) { tabStack(.home) { HomeView() } }
+                page(.swipe) { tabStack(.swipe) { SwipeMusicView() } }
                 page(.search) { tabStack(.search) { SearchView(query: "").id(account.sessionRevision) } }
                 page(.library) { tabStack(.library) { LibraryView(showLogin: $showLogin) } }
             }
@@ -1097,6 +1103,7 @@ public struct IOSMainWindow: View {
     private func popToRoot(_ tab: IOSTab) {
         switch tab {
         case .home: homePath = []
+        case .swipe: swipePath = []
         case .search: searchPath = []
         case .library: libraryPath = []
         }
@@ -1139,6 +1146,7 @@ public struct IOSMainWindow: View {
     private func binding(for tab: IOSTab) -> Binding<[Destination]> {
         switch tab {
         case .home: return $homePath
+        case .swipe: return $swipePath
         case .search: return $searchPath
         case .library: return $libraryPath
         }
