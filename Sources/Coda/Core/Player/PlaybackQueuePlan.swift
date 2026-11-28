@@ -9,6 +9,8 @@ enum PlaySource: Codable, Equatable {
     case cloud
     case none
     case qishuiFeed(QishuiFeedState, playlistID: Int?)
+    /// The swipe-music feed: eligible for the feed-only aggressive prefetch.
+    case swipeFeed
 
     var sourceID: Int {
         switch self {

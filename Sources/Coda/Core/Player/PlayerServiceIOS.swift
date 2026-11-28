@@ -280,6 +280,12 @@ final class PlayerService: ObservableObject {
 
     /// Fills the cache with the next few songs while the network is free.
     private let queuePrefetcher = QueuePrefetcher()
+    /// Feed-only second prefetcher with an aggressive window (6 songs /
+    /// 1 hour / 300 MB). Swipe-feed listeners skip within seconds, so the
+    /// normal 2-song window leaves most landings cold; other queues keep
+    /// the conservative prefetcher.
+    private let feedPrefetcher = QueuePrefetcher(limits: PrefetchLimits(tracks: 6, seconds: 60 * 60, bytes: 300_000_000))
+    private var qishuiExtraWarms: [Task<Void, Never>] = []
     private var prefetchObservations: Set<AnyCancellable> = []
     private var prefetchUpdateScheduled = false
 
@@ -1820,7 +1826,7 @@ final class PlayerService: ObservableObject {
         guard isPlaying, !isBuffering, SettingsManager.shared.enableAudioCache,
               let current = currentTrack,
               QueuePrefetcher.permits(network: networkState, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
-        else { cancelQishuiPrefetch(); queuePrefetcher.update(nil); return }
+        else { cancelQishuiPrefetch(); queuePrefetcher.update(nil); feedPrefetcher.update(nil); return }
         // Qishui's perishable part is its signed stream URL, so a Qishui
         // next track gets its playback resource warmed through the API.
         // That is an add-on keyed on the NEXT track — not, as before, a
@@ -1838,18 +1844,38 @@ final class PlayerService: ObservableObject {
         } else {
             cancelQishuiPrefetch()
         }
+        // In the swipe feed, warm the 2nd and 3rd upcoming Qishui songs'
+        // playback resources too — fast swiping outruns a single warm-up.
+        if source == .swipeFeed {
+            let quality = SettingsManager.shared.preferredPlaybackQuality
+            let upcomingQishui = nextCandidates().prefix(5).compactMap { $0.track.platformSong?.qishui?.trackID }
+            for task in qishuiExtraWarms { task.cancel() }
+            qishuiExtraWarms = upcomingQishui.dropFirst().prefix(2).map { trackID in
+                Task { _ = try? await QishuiMusicAPI.shared.playback(trackID: trackID, quality: quality) }
+            }
+        }
         // Qishui tracks themselves are not file-prefetched (the warm-up
         // above is their preparation); every other platform's upcoming
         // songs download ahead as usual.
         let candidates = nextCandidates().map(\.track).filter { $0.platformSong?.source != .qishui }
-        let upcoming = PrefetchLimits().window(candidates)
-        guard !upcoming.isEmpty else { queuePrefetcher.update(nil); return }
+        let aggressive = source == .swipeFeed
+        let upcoming = (aggressive
+            ? PrefetchLimits(tracks: 6, seconds: 60 * 60, bytes: 300_000_000)
+            : PrefetchLimits()).window(candidates)
+        guard !upcoming.isEmpty else { queuePrefetcher.update(nil); feedPrefetcher.update(nil); return }
         let scope = offlineAccountScope
         let pending = Set(DownloadManager.shared.pendingJobs.filter { $0.accountScope == scope }.map(\.track.id))
-        queuePrefetcher.update(.init(scope: scope, currentTrackID: current.id, tracks: upcoming,
-                                     quality: SettingsManager.shared.preferredPlaybackQuality.rawValue,
-                                     pendingDownloadTrackIDs: pending,
-                                     alwaysHighest: SettingsManager.shared.alwaysHighestAudioQuality))
+        let request = QueuePrefetchRequest(scope: scope, currentTrackID: current.id, tracks: upcoming,
+                                           quality: SettingsManager.shared.preferredPlaybackQuality.rawValue,
+                                           pendingDownloadTrackIDs: pending,
+                                           alwaysHighest: SettingsManager.shared.alwaysHighestAudioQuality)
+        if aggressive {
+            queuePrefetcher.update(nil)
+            feedPrefetcher.update(request)
+        } else {
+            feedPrefetcher.update(nil)
+            queuePrefetcher.update(request)
+        }
         // Warm the next songs' artwork alongside their audio, so a track
         // change never waits on a cover download.
         for track in upcoming {
@@ -1862,6 +1888,8 @@ final class PlayerService: ObservableObject {
     private func cancelQishuiPrefetch() {
         qishuiPrefetch?.task.cancel()
         qishuiPrefetch = nil
+        for task in qishuiExtraWarms { task.cancel() }
+        qishuiExtraWarms = []
     }
 
     /// A downloaded copy of the track. Online it must match the chosen quality
