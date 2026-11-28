@@ -8,7 +8,7 @@ workflows:
     scripts:
       - name: Build unsigned iOS IPA
         script: |
-          VERSION="0.3.2"
+          VERSION="0.3.3"
           BUILD_NUMBER="$(git rev-list --count HEAD)"
           xcodebuild -workspace ios/CodaIOS.xcworkspace -scheme CodaIOS \
             -configuration Release -destination 'generic/platform=iOS' \

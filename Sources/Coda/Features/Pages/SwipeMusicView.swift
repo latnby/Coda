@@ -89,7 +89,7 @@ struct SwipeMusicView: View {
 
     private func prewarm(around idx: Int) {
         for j in max(0, idx - 1)...min(model.tracks.count - 1, idx + 2) {
-            if let url = model.tracks[j].album.picUrl?.resizedImageURL(768) {
+            if let url = model.tracks[j].album.picUrl?.resizedImageURL(1080) {
                 Task { _ = await ImageCache.shared.image(for: url) }
             }
         }
@@ -201,76 +201,65 @@ struct SwipeMusicView: View {
     }
 }
 
-/// One full-screen song page: blurred cover backdrop, the cover itself,
-/// title/artist, a like button and — for the playing page — progress.
+/// One full-screen song page. The artwork IS the page — a big picture
+/// filling the whole screen, with the title and controls laid over it.
+/// Tapping the picture swaps it for the synced lyrics over the same
+/// artwork blurred into a frosted depth-of-field backdrop (the
+/// now-playing page's treatment); a cover button in the control row
+/// swaps back, so the tap never fights the lyrics' own scrolling and
+/// tap-to-seek.
 @available(iOS 17.0, macOS 15.0, *)
 private struct SwipePage: View {
     let track: Track
     let isCurrent: Bool
     @EnvironmentObject private var player: PlayerService
-    @Environment(\.colorScheme) private var colorScheme
+    @State private var showLyrics = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                backdrop(size: geo.size)
-                VStack(spacing: 18) {
-                    Spacer()
-                    cover(size: min(320, geo.size.width - 88))
-                    VStack(spacing: 6) {
-                        Text(track.name)
-                            .font(.title3.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                        Text(track.artistNames)
-                            .font(Theme.Typography.secondary)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    LikeButton(trackID: track.id, size: 25)
-                    progressBar
-                    Spacer()
+                artworkLayer(size: geo.size)
+                legibilityGradient(size: geo.size)
+                if showLyrics && isCurrent {
+                    lyricsLayer
+                        .padding(.top, 96)
+                        .padding(.bottom, 178)
+                        .transition(.opacity)
                 }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 118)
-                if isCurrent && !player.isPlaying {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 62))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .shadow(radius: 12)
-                        .allowsHitTesting(false)
+                bottomOverlay
+                if isCurrent && !player.isPlaying && !showLyrics {
+                    Button { player.togglePlayPause() } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 62))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .shadow(radius: 12)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { player.togglePlayPause() }
-    }
-
-    private func backdrop(size: CGSize) -> some View {
-        ZStack {
-            Platform.windowBackgroundColor
-            if let cover = track.album.picUrl?.resizedImageURL(384) {
-                CachedAsyncImage(url: cover)
-                    .scaledToFill()
-                    .blur(radius: 80)
-                    .opacity(colorScheme == .dark ? 0.45 : 0.3)
-                    .saturation(1.4)
-            }
-            LinearGradient(
-                colors: [.clear, Platform.windowBackgroundColor.opacity(0.6)],
-                startPoint: .top, endPoint: .bottom
-            )
+        .onTapGesture {
+            // Only the cover state uses the page tap; in lyrics state the
+            // cover button (below) is the way back.
+            if !showLyrics { withAnimation(.easeInOut(duration: 0.25)) { showLyrics = true } }
         }
-        .frame(width: size.width, height: size.height)
-        .clipped()
+        .onChange(of: isCurrent) { _, current in
+            if !current { showLyrics = false }
+        }
     }
 
-    private func cover(size: CGFloat) -> some View {
+    // MARK: - Layers
+
+    private func artworkLayer(size: CGSize) -> some View {
         Group {
-            if let url = track.album.picUrl?.resizedImageURL(768) {
+            if let url = track.album.picUrl?.resizedImageURL(1080) {
                 CachedAsyncImage(url: url)
+                    .scaledToFill()
+                    .scaleEffect(showLyrics ? 1.25 : 1)
+                    .blur(radius: showLyrics ? 30 : 0)
             } else {
-                Rectangle().fill(.quaternary.opacity(0.4))
+                Rectangle().fill(.quaternary)
                     .overlay {
                         Image(systemName: "music.note")
                             .font(.system(size: 54, weight: .light))
@@ -278,17 +267,92 @@ private struct SwipePage: View {
                     }
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.35), radius: 28, y: 14)
+        .frame(width: size.width, height: size.height)
+        .clipped()
+        .overlay { if showLyrics { Color.black.opacity(0.22) } }
+        .animation(.easeInOut(duration: 0.3), value: showLyrics)
+    }
+
+    private func legibilityGradient(size: CGSize) -> some View {
+        LinearGradient(
+            colors: [.clear, .black.opacity(0.55)],
+            startPoint: UnitPoint(x: 0.5, y: 0.55), endPoint: .bottom
+        )
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var lyricsLayer: some View {
+        if let lyrics = player.lyrics, !lyrics.isEmpty {
+            AppleMusicLyricsColumn(lyrics: lyrics)
+                .id(player.currentTrack?.id)
+        } else if player.lyrics?.isInstrumental == true {
+            centeredNote("纯音乐，请欣赏")
+        } else if player.lyrics != nil {
+            centeredNote("暂无歌词")
+        } else {
+            centeredNote("歌词加载中…")
+        }
+    }
+
+    private func centeredNote(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Typography.secondary)
+            .foregroundStyle(.white.opacity(0.75))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Overlay
+
+    private var bottomOverlay: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            VStack(spacing: 5) {
+                Text(track.name)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .shadow(radius: 6)
+                Text(track.artistNames)
+                    .font(Theme.Typography.secondary)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            HStack(spacing: 30) {
+                LikeButton(trackID: track.id, size: 25)
+                if isCurrent {
+                    Button { player.togglePlayPause() } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 27))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 6)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { showLyrics.toggle() }
+                    } label: {
+                        Image(systemName: showLyrics ? "photo" : "text.quote")
+                            .font(.system(size: 23))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            progressBar
+        }
+        .padding(.horizontal, 28)
+        .padding(.bottom, 118)
     }
 
     private var progressBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(.secondary.opacity(0.3)).frame(height: 3)
+                Capsule().fill(.white.opacity(0.3)).frame(height: 3)
                 if isCurrent && player.duration > 0 {
-                    Capsule().fill(.primary)
+                    Capsule().fill(.white)
                         .frame(width: geo.size.width * min(1, max(0, player.progress / player.duration)), height: 3)
                 }
             }
