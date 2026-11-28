@@ -86,10 +86,6 @@ final class PlayerService: ObservableObject {
     // MARK: - Observable state
 
     @Published private(set) var queue: [Track] = []
-    /// True while the queue is an aggregate (cross-platform) list: starting a
-    /// track from another platform then follows the song instead of refusing
-    /// it, switching the app context via `switchProviderForPlayback`.
-    private(set) var queueAllowsMixedProviders = false
     /// The open listening-statistics session for the report page.
     private var listeningSession: (track: Track, startedAt: Date)?
     @Published private(set) var shuffledQueue: [Track] = []
@@ -419,15 +415,8 @@ final class PlayerService: ObservableObject {
     ///   lists that place in the Dock menu's recently played section; callers
     ///   playing an ad-hoc selection (search results, a single track) omit it.
     func play(tracks: [Track], source: PlaySource, startAt track: Track? = nil,
-              context: PlayContext? = nil, allowMixedProviders: Bool = false) {
+              context: PlayContext? = nil) {
         guard !tracks.isEmpty else { return }
-        let provider = MusicProviderContext.shared.current
-        guard allowMixedProviders
-                || tracks.allSatisfy({ ($0.platformSong?.source.rawValue ?? "netease") == provider.rawValue }) else {
-            ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
-            return
-        }
-        queueAllowsMixedProviders = allowMixedProviders
         tracks.forEach { PlatformMusicAPI.shared.restore($0) }
         if let context { recordRecent(context) }
         isFMMode = false
@@ -668,11 +657,12 @@ final class PlayerService: ObservableObject {
                 external = resolved
             } else {
                 let result: SongURLData?
+                let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
                 if alwaysHighest {
-                    result = try await NeteaseAPI.preferredSongURL(id: track.id,
+                    result = try await NeteaseAPI.playbackPreferredSongURL(id: track.id, provider: trackProvider,
                         quality: settings.preferredPlaybackQuality, alwaysHighest: true)
                 } else {
-                    result = try await NeteaseAPI.songURL(ids: [track.id], level: settings.audioQuality.rawValue).first
+                    result = try await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: settings.audioQuality.rawValue)
                 }
                 guard !Task.isCancelled, generation == resolveGeneration,
                       currentTrack?.id == track.id, scope == offlineAccountScope else { return }
@@ -1111,17 +1101,6 @@ final class PlayerService: ObservableObject {
 
     private func startPlaying(_ track: Track,
                               localLease: OfflinePlaybackLease? = nil, resumeAt: TimeInterval = 0) {
-        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
-        if trackProvider != MusicProviderContext.shared.current {
-            guard queueAllowsMixedProviders else {
-                ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
-                return
-            }
-            // A mixed queue follows the song: the app context switches to
-            // this track's platform so its stream resolves like a native
-            // queue, and the next track switches again the same way.
-            AccountStore.shared.switchProviderForPlayback(trackProvider)
-        }
         fmLoadID = nil
         cancelQishuiFeedLoad()
         qishuiFeedDrained = false
@@ -1190,11 +1169,12 @@ final class PlayerService: ObservableObject {
                                 skipsLocalCopies: Bool = false,
                                 resumeAt: TimeInterval = 0) async {
         let settings = SettingsManager.shared
+        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
         // Resolve the real highest tier before choosing a local cache key. A
         // lower-tier prefetch must never silently override "always highest".
         var highestSource: SongURLData?
         if settings.alwaysHighestAudioQuality, networkState.connected, track.platformSong?.source != .qishui {
-            highestSource = try? await NeteaseAPI.preferredSongURL(id: track.id,
+            highestSource = try? await NeteaseAPI.playbackPreferredSongURL(id: track.id, provider: trackProvider,
                 quality: settings.preferredPlaybackQuality, alwaysHighest: true)
             guard generation == resolveGeneration else { return }
         }
@@ -1213,7 +1193,7 @@ final class PlayerService: ObservableObject {
                 if let cached = try await AudioCache.shared.entry(
                     for: track.id,
                     requestedQuality: quality,
-                    requiresServedQuality: MusicProviderContext.shared.current == .netease && !usesOfflineQueue
+                    requiresServedQuality: trackProvider == .netease && !usesOfflineQueue
                 ) {
                     guard generation == resolveGeneration else { return }
                     let lease = await AudioCache.shared.retain(cached)
@@ -1255,7 +1235,7 @@ final class PlayerService: ObservableObject {
             if let highestSource {
                 data = highestSource
             } else {
-                data = try await NeteaseAPI.preferredSongURL(id: track.id,
+                data = try await NeteaseAPI.playbackPreferredSongURL(id: track.id, provider: trackProvider,
                     quality: SettingsManager.shared.preferredPlaybackQuality,
                     alwaysHighest: SettingsManager.shared.alwaysHighestAudioQuality)
             }
@@ -1849,14 +1829,7 @@ final class PlayerService: ObservableObject {
             return
         }
         cancelQishuiPrefetch()
-        var candidates = nextCandidates().map(\.track)
-        if queueAllowsMixedProviders {
-            // Prefetch resolves under the current platform; a song from
-            // another platform waits for its own turn at the front instead
-            // of being fetched under the wrong platform's catalog.
-            let currentRaw = MusicProviderContext.shared.current.rawValue
-            candidates = candidates.filter { ($0.platformSong?.source.rawValue ?? "netease") == currentRaw }
-        }
+        let candidates = nextCandidates().map(\.track)
         let upcoming = PrefetchLimits().window(candidates)
         guard !upcoming.isEmpty else { queuePrefetcher.update(nil); return }
         let scope = offlineAccountScope
@@ -2225,7 +2198,6 @@ final class PlayerService: ObservableObject {
         suspendForAccountChange()
         qishuiContinuation.reset()
         qishuiFeedDrained = false
-        queueAllowsMixedProviders = false
         queue = []; shuffledQueue = []; playNextList = []
         currentTrack = nil; currentIndex = -1
         recentContexts = []; source = .none; fmUpcoming = []
@@ -2257,7 +2229,6 @@ final class PlayerService: ObservableObject {
         if let session = state.session {
             do {
                 try session.validate()
-                guard (session.currentTrack.platformSong?.source.rawValue ?? "netease") == MusicProviderContext.shared.current.rawValue else { recentContexts = []; return }
                 session.queue.forEach { PlatformMusicAPI.shared.restore($0) }
                 applyPlaybackSession(session)
                 audioQualityBadgeState = state.audioQualityBadge

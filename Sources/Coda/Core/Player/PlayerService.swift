@@ -91,10 +91,6 @@ final class PlayerService: ObservableObject {
     // MARK: - Observable state
 
     @Published private(set) var queue: [Track] = []
-    /// True while the queue is an aggregate (cross-platform) list: starting a
-    /// track from another platform then follows the song instead of refusing
-    /// it, switching the app context via `switchProviderForPlayback`.
-    private(set) var queueAllowsMixedProviders = false
     @Published private(set) var shuffledQueue: [Track] = []
     /// The AutoMix order's working list: `queue` with the decided next track
     /// spliced to `currentIndex + 1` as each pick is made.
@@ -513,15 +509,8 @@ final class PlayerService: ObservableObject {
     ///   lists that place in the Dock menu's recently played section; callers
     ///   playing an ad-hoc selection (search results, a single track) omit it.
     func play(tracks: [Track], source: PlaySource, startAt track: Track? = nil,
-              context: PlayContext? = nil, allowMixedProviders: Bool = false) {
+              context: PlayContext? = nil) {
         guard !tracks.isEmpty else { return }
-        let provider = MusicProviderContext.shared.current
-        guard allowMixedProviders
-                || tracks.allSatisfy({ ($0.platformSong?.source.rawValue ?? "netease") == provider.rawValue }) else {
-            ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
-            return
-        }
-        queueAllowsMixedProviders = allowMixedProviders
         tracks.forEach { PlatformMusicAPI.shared.restore($0) }
         if let context { recordRecent(context) }
         isFMMode = false
@@ -861,11 +850,12 @@ final class PlayerService: ObservableObject {
                 external = resolved
             } else {
                 let data: SongURLData?
+                let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
                 if alwaysHighest {
-                    data = try await NeteaseAPI.preferredSongURL(id: track.id,
+                    data = try await NeteaseAPI.playbackPreferredSongURL(id: track.id, provider: trackProvider,
                         quality: settings.preferredPlaybackQuality, alwaysHighest: true)
                 } else {
-                    data = try await NeteaseAPI.songURL(ids: [track.id], level: settings.audioQuality.rawValue).first
+                    data = try await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: settings.audioQuality.rawValue)
                 }
                 guard !Task.isCancelled, generation == resolveGeneration,
                       currentTrack?.id == track.id, scope == offlineAccountScope else { return }
@@ -1347,14 +1337,6 @@ final class PlayerService: ObservableObject {
 
     private func startPlaying(_ track: Track,
                               localLease: OfflinePlaybackLease? = nil, resumeAt: TimeInterval = 0) {
-        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
-        if trackProvider != MusicProviderContext.shared.current {
-            guard queueAllowsMixedProviders else {
-                ToastCenter.shared.show("请先切换到歌曲所属的音乐平台")
-                return
-            }
-            AccountStore.shared.switchProviderForPlayback(trackProvider)
-        }
         fmLoadID = nil
         cancelQishuiFeedLoad()
         qishuiFeedDrained = false
@@ -1452,23 +1434,24 @@ final class PlayerService: ObservableObject {
                                onFailure: ((Error) -> Void)? = nil) async -> ResolvedSource? {
         let settings = SettingsManager.shared
         let quality = settings.audioQuality.rawValue
-        let isNetease = MusicProviderContext.shared.current == .netease
+        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
+        let isNetease = trackProvider == .netease
         var data: SongURLData?
         if track.platformSong?.source == .qishui {
-            do { data = try await NeteaseAPI.songURL(ids: [track.id], level: settings.preferredPlaybackQuality.rawValue).first }
+            do { data = try await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: settings.preferredPlaybackQuality.rawValue) }
             catch {
                 onFailure?(error)
                 // Without membership or rights, look for the song elsewhere.
                 guard (error as? QishuiError)?.invitesUnblock == true else { return nil }
             }
         } else if isNetease || settings.alwaysHighestAudioQuality {
-            data = try? await NeteaseAPI.preferredSongURL(id: track.id,
+            data = try? await NeteaseAPI.playbackPreferredSongURL(id: track.id, provider: trackProvider,
                 quality: settings.preferredPlaybackQuality, alwaysHighest: settings.alwaysHighestAudioQuality)
         } else {
-            data = try? await NeteaseAPI.songURL(ids: [track.id], level: quality).first
+            data = try? await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: quality)
         }
         if !isNetease, data?.url == nil, quality != AudioQuality.standard.rawValue {
-            data = try? await NeteaseAPI.songURL(ids: [track.id], level: AudioQuality.standard.rawValue).first
+            data = try? await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: AudioQuality.standard.rawValue)
         }
         var url: URL?
         var unblock: ResolvedAudioSource?
@@ -4266,7 +4249,6 @@ final class PlayerService: ObservableObject {
         suspendForAccountChange()
         qishuiContinuation.reset()
         qishuiFeedDrained = false
-        queueAllowsMixedProviders = false
         queue = []; shuffledQueue = []; autoMixQueue = []; playNextList = []
         currentTrack = nil; currentIndex = -1
         recentContexts = []; source = .none

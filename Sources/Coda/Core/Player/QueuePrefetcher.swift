@@ -217,15 +217,16 @@ final class QueuePrefetcher {
     /// are left to playback, which knows how to fall back.
     static func resolveSongURL(track: Track, quality: String, alwaysHighest: Bool = false) async throws -> QueuePrefetchSource? {
         await PlatformMusicAPI.shared.restore(track)
+        let trackProvider = MusicProvider(rawValue: track.platformSong?.source.rawValue ?? "netease") ?? .netease
         if alwaysHighest {
-            guard let data = try await NeteaseAPI.preferredSongURL(
-                    id: track.id, quality: AudioQuality(rawValue: quality) ?? .hires, alwaysHighest: true),
+            guard let data = try await NeteaseAPI.playbackPreferredSongURL(
+                    id: track.id, provider: trackProvider, quality: AudioQuality(rawValue: quality) ?? .hires, alwaysHighest: true),
                   data.freeTrialInfo == nil, let string = data.url,
                   let url = track.remotePlaybackURL(string) else { return nil }
             return .init(url: url, servedQuality: data.resolvedAudioQuality?.rawValue ?? data.level,
                          byteCount: Int64(max(data.size, 0)), fileExtension: data.type)
         }
-        guard let data = try await NeteaseAPI.songURL(ids: [track.id], level: quality).first,
+        guard let data = try await NeteaseAPI.playbackSongURL(id: track.id, provider: trackProvider, level: quality),
               data.freeTrialInfo == nil, let string = data.url,
               let url = track.remotePlaybackURL(string) else { return nil }
         return .init(url: url, servedQuality: data.level, byteCount: Int64(max(data.size, 0)), fileExtension: data.type)

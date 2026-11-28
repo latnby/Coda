@@ -720,20 +720,26 @@ enum NeteaseAPI {
     }
 
     static func songAudioQualityOptions(id: Int) async throws -> [AudioQualityOption] {
-        if MusicProviderContext.shared.current != .netease {
+        // Catalog songs (negative ids) belong to whichever platform the
+        // catalog says — route by the song, not by the UI's current
+        // provider, so the quality menu works for a song playing from
+        // another platform.
+        if id < 0 || MusicProviderContext.shared.current != .netease {
             return try await PlatformMusicAPI.shared.songAudioQualityOptions(id: id)
         }
-        try MusicProviderContext.shared.requireNetease()
+        return try await songAudioQualityOptionsNative(id: id)
+    }
+
+    /// The NetEase-native quality probe; see `preferredSongURLNative`.
+    static func songAudioQualityOptionsNative(id: Int) async throws -> [AudioQualityOption] {
         guard id > 0 else { throw MusicProviderError.missingTrack }
         struct Response: Decodable { let songs: [SongQualityDetail] }
         let c = "[{\"id\":\(id)}]"
-        let ticket = MusicProviderContext.shared.ticket
         let options = try await eapi(Response.self, "/v3/song/detail", ["c": c]).songs.first?.options ?? []
         var checked = options.filter { ![.lossless, .hires].contains($0.quality) }
         for option in options where [.lossless, .hires].contains(option.quality) {
-            let data = try? await songURL(ids: [id], level: option.quality.rawValue).first { $0.id == id }
+            let data = try? await songURLNative(ids: [id], level: option.quality.rawValue).first { $0.id == id }
             try Task.checkCancellation()
-            try MusicProviderContext.shared.check(ticket)
             guard let data, data.url?.isEmpty == false, data.freeTrialInfo == nil,
                   data.code == nil || data.code == 200, let tier = data.resolvedAudioQuality else { continue }
             let bitrate = AudioQualityCheck.bitrateBPS(Double(data.br))
@@ -758,9 +764,18 @@ enum NeteaseAPI {
     /// a higher request. Probe intermediate tiers only if they can improve it.
     static func preferredSongURL(id: Int, quality: AudioQuality, alwaysHighest: Bool,
                                  using client: NeteaseClient = .shared) async throws -> SongURLData? {
-        let context = MusicProviderContext.shared
-        let ticket = context.ticket
-        if context.current != .netease { return try await PlatformMusicAPI.shared.songURLs(ids: [id], level: quality.rawValue).first }
+        if MusicProviderContext.shared.current != .netease { return try await PlatformMusicAPI.shared.songURLs(ids: [id], level: quality.rawValue).first }
+        return try await preferredSongURLNative(id: id, quality: quality, alwaysHighest: alwaysHighest, using: client)
+    }
+
+    /// The NetEase-native tier probe, independent of which provider the
+    /// app's UI is currently showing: playback resolves every song through
+    /// its own platform, so this also runs for NetEase songs while the
+    /// listener browses another platform. Staleness is the caller's job
+    /// (the player guards with its resolve generation); the client
+    /// fingerprint checks below still cancel on an account change.
+    private static func preferredSongURLNative(id: Int, quality: AudioQuality, alwaysHighest: Bool,
+                                 using client: NeteaseClient = .shared) async throws -> SongURLData? {
         guard id > 0 else { throw MusicProviderError.missingTrack }
         let authentication = client.authenticationFingerprint
         let ranks = AudioQuality.allCases
@@ -771,13 +786,11 @@ enum NeteaseAPI {
         var bestRank = -1
         var lastError: Error?
         for candidate in candidates {
-            try context.check(ticket)
             guard client.authenticationFingerprint == authentication else { throw CancellationError() }
             let candidateRank = ranks.firstIndex(of: candidate) ?? 0
             if best?.freeTrialInfo == nil, bestRank >= candidateRank { break }
             do {
-                let results = try await songURL(ids: [id], level: candidate.rawValue, using: client)
-                try context.check(ticket)
+                let results = try await songURLNative(ids: [id], level: candidate.rawValue, using: client)
                 guard client.authenticationFingerprint == authentication else { throw CancellationError() }
                 let result = results.first { $0.id == id }
                 let actual = result?.resolvedAudioQuality
@@ -798,11 +811,33 @@ enum NeteaseAPI {
             } catch is CancellationError { throw CancellationError() }
             catch { lastError = error }
         }
-        try context.check(ticket)
         guard client.authenticationFingerprint == authentication else { throw CancellationError() }
         if let best { return best }
         if let lastError { throw lastError }
         return nil
+    }
+
+    // MARK: - Playback routing (per-song provider)
+
+    /// Resolves a song through ITS OWN platform, wherever the UI context
+    /// currently sits. Playback goes through here so the account on screen
+    /// never has to follow the song being played.
+    static func playbackSongURL(id: Int, provider: MusicProvider, level: String) async throws -> SongURLData? {
+        switch provider {
+        case .netease:
+            return try await songURLNative(ids: [id], level: level).first
+        default:
+            return try await PlatformMusicAPI.shared.songURLs(ids: [id], level: level).first
+        }
+    }
+
+    static func playbackPreferredSongURL(id: Int, provider: MusicProvider, quality: AudioQuality, alwaysHighest: Bool) async throws -> SongURLData? {
+        switch provider {
+        case .netease:
+            return try await preferredSongURLNative(id: id, quality: quality, alwaysHighest: alwaysHighest)
+        default:
+            return try await PlatformMusicAPI.shared.songURLs(ids: [id], level: quality.rawValue).first
+        }
     }
 
     struct SongURLResponse: Decodable {
@@ -810,18 +845,19 @@ enum NeteaseAPI {
     }
 
     static func songURL(ids: [Int], level: String, using client: NeteaseClient = .shared) async throws -> [SongURLData] {
-        let context = MusicProviderContext.shared
-        let ticket = context.ticket
-        if context.current != .netease { return try await PlatformMusicAPI.shared.songURLs(ids: ids, level: level) }
+        if MusicProviderContext.shared.current != .netease { return try await PlatformMusicAPI.shared.songURLs(ids: ids, level: level) }
+        return try await songURLNative(ids: ids, level: level, using: client)
+    }
+
+    /// The NetEase-native song-URL request; see `preferredSongURLNative`.
+    static func songURLNative(ids: [Int], level: String, using client: NeteaseClient = .shared) async throws -> [SongURLData] {
         let idString = "[" + ids.map(String.init).joined(separator: ",") + "]"
         var payload: [String: Any] = ["ids": idString, "level": level, "encodeType": "flac"]
         if level == "sky" { payload["immerseType"] = "c51" }
         let authentication = client.authenticationFingerprint
         func request(overrides: [String: String]) async throws -> [SongURLData] {
-            try context.check(ticket)
             guard client.authenticationFingerprint == authentication else { throw CancellationError() }
             let data = try await client.eapi("/song/enhance/player/url/v1", payload, cookieOverrides: overrides)
-            try context.check(ticket)
             guard client.authenticationFingerprint == authentication else { throw CancellationError() }
             let streams = try client.decoded(SongURLResponse.self, from: data).data
             var checked: [SongURLData] = []
@@ -845,7 +881,6 @@ enum NeteaseAPI {
                     }
                 }
                 try Task.checkCancellation()
-                try context.check(ticket)
                 guard client.authenticationFingerprint == authentication else { throw CancellationError() }
                 checked.append(result)
             }

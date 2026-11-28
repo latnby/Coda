@@ -8,7 +8,6 @@ import SwiftUI
 /// signed in at all.
 struct AggregatePlaylistSection: View {
     @ObservedObject private var store = AggregatePlaylistStore.shared
-    @State private var selectedPlaylistID: UUID?
     @State private var showImport = false
     @State private var showNewPlaylist = false
     @State private var newPlaylistName = ""
@@ -60,9 +59,7 @@ struct AggregatePlaylistSection: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(store.playlists) { playlist in
-                            Button {
-                                selectedPlaylistID = playlist.id
-                            } label: {
+                            NavigationLink(value: Destination.aggregatePlaylist(playlist.id)) {
                                 CoverCardBody(
                                     coverURL: playlist.coverURLString?.resizedImageURL(384),
                                     title: playlist.name,
@@ -76,19 +73,7 @@ struct AggregatePlaylistSection: View {
                 }
             }
         }
-        .sheet(item: Binding(
-            get: { selectedPlaylistID.map { AggregatePlaylistRef(id: $0) } },
-            set: { selectedPlaylistID = $0?.id }
-        )) { ref in
-            NavigationStack {
-                AggregatePlaylistDetailView(playlistID: ref.id)
-            }
-        }
     }
-}
-
-private struct AggregatePlaylistRef: Identifiable {
-    let id: UUID
 }
 
 // MARK: - Detail
@@ -187,7 +172,6 @@ struct AggregatePlaylistDetailView: View {
                     MusicTrackPanel(
                         tracks: filtered, source: .none, context: nil,
                         showsLikeButton: false,
-                        allowMixedProviders: true,
                         onRemoveFromList: { store.remove(trackIdentity: $0.aggregateIdentity, from: playlistID) },
                         trailingText: { $0.aggregateSourceName }
                     )
@@ -198,11 +182,6 @@ struct AggregatePlaylistDetailView: View {
         .modifier(DetailArtworkBackground(artworkURL: playlist.coverURLString))
         .musicLibraryNavigationTitle(playlist.name, enabled: true)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("关闭") { dismiss() }
-            }
-        }
     }
 
     private var moreMenu: some View {
@@ -232,7 +211,7 @@ struct AggregatePlaylistDetailView: View {
 
     private func playAll(_ tracks: [Track]) {
         guard let first = tracks.first else { return }
-        player.play(tracks: tracks, source: .none, startAt: first, allowMixedProviders: true)
+        player.play(tracks: tracks, source: .none, startAt: first)
     }
 }
 

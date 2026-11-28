@@ -176,7 +176,6 @@ struct MusicTrackPanel: View {
     var showsRowSeparators: Bool? = nil
     var removableFromPlaylistID: Int?
     var onRemoved: ((Track) -> Void)?
-    var allowMixedProviders = false
     var onRemoveFromList: ((Track) -> Void)?
     var recommendationContext: RecommendationContext?
     var onRecommendationReduced: ((Track, Track) -> Void)?
@@ -205,7 +204,7 @@ struct MusicTrackPanel: View {
                       showsRowSeparators: showsRowSeparators,
                       source: source, context: context,
                       removableFromPlaylistID: removableFromPlaylistID, onRemoved: onRemoved,
-                      allowMixedProviders: allowMixedProviders, onRemoveFromList: onRemoveFromList,
+                      onRemoveFromList: onRemoveFromList,
                       recommendationContext: recommendationContext,
                       onRecommendationReduced: onRecommendationReduced,
                       trailingText: trailingText,

@@ -746,6 +746,9 @@ final class PlatformMusicAPI {
             try MusicProviderContext.shared.check(ticket)
             return options
         }
+        if item.source == .netease {
+            return try await NeteaseAPI.songAudioQualityOptionsNative(id: item.id)
+        }
         guard let mid = item.qqMid else { return [] }
         let bitrates = (try? await QQMusicAPI.shared.averageBitrates(songmid: mid)) ?? [:]
         try MusicProviderContext.shared.check(ticket)
@@ -779,7 +782,7 @@ final class PlatformMusicAPI {
             let item = try song(id)
             let url: String?
             var actualLevel: String?
-            if provider == .qishui {
+            if item.source == .qishui {
                 guard let trackID = item.qishui?.trackID else { throw MusicProviderError.missingTrack }
                 let resource = try await QishuiMusicAPI.shared.playback(trackID: trackID, quality: AudioQuality(rawValue: level))
                 try MusicProviderContext.shared.check(ticket)
@@ -788,11 +791,21 @@ final class PlatformMusicAPI {
                     "br": resource.bitrate ?? 0, "size": resource.size, "type": resource.format, "level": resource.level.rawValue
                 ]))
                 continue
-            } else if provider == .qq {
+            } else if item.source == .qq {
                 guard let mid = item.qqMid else { throw MusicProviderError.missingTrack }
                 let resolved = try await QQMusicAPI.shared.songURLResult(songmid: mid, mediaMid: item.qqMediaMid, quality: quality)
                 url = resolved?.url
                 actualLevel = resolved?.quality?.rawValue
+            } else if item.source == .netease {
+                // The catalog id is negative and means nothing to NetEase;
+                // the vendor id on the catalog entry is the real one.
+                let native = try await NeteaseAPI.songURLNative(ids: [item.id], level: level).first
+                if let native {
+                    result.append(native)
+                    continue
+                }
+                url = nil
+                actualLevel = nil
             } else {
                 if item.kugouCloud != nil {
                     url = try await KugouMusicAPI.shared.userCloudURL(song: item)

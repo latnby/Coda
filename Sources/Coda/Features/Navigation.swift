@@ -107,6 +107,7 @@ enum Destination: Hashable {
     case shortcuts
     #endif
     case playlist(Int)
+    case aggregatePlaylist(UUID)
     case radarPlaylist(Int)
     case album(Int)
     case artist(Int)
@@ -214,6 +215,8 @@ struct DestinationsModifier: ViewModifier {
         #endif
         case .playlist(let id):
             PlaylistDetailView(playlistID: id, isLikedList: id == account.likedSongsPlaylist?.id)
+        case .aggregatePlaylist(let id):
+            AggregatePlaylistDetailView(playlistID: id)
         case .radarPlaylist(let id):
             PlaylistDetailView(playlistID: id, recommendationContext: .radar)
         case .album(let id):

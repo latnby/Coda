@@ -785,8 +785,6 @@ struct TrackListView: View {
     var removableFromPlaylistID: Int?
     var onRemoved: ((Track) -> Void)?
     var onDeleteFromCloud: ((Track) -> Void)?
-    /// Aggregate (cross-platform) lists play as one mixed queue.
-    var allowMixedProviders = false
     /// Local-list removal (aggregate playlists), keyed by the row's track.
     var onRemoveFromList: ((Track) -> Void)?
     var recommendationContext: RecommendationContext?
@@ -872,7 +870,7 @@ struct TrackListView: View {
             onRemoveFromList: onRemoveFromList == nil ? nil : { onRemoveFromList?(track) }
         ) {
             player.play(tracks: tracks, source: source, startAt: track,
-                        context: context, allowMixedProviders: allowMixedProviders)
+                        context: context)
         }
         return VStack(spacing: 0) {
             if let selection {
