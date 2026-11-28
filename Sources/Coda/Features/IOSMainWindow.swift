@@ -1077,7 +1077,16 @@ public struct IOSMainWindow: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 page(.home) { tabStack(.home) { HomeView() } }
-                page(.swipe) { tabStack(.swipe) { SwipeMusicView() } }
+                page(.swipe) {
+                    tabStack(.swipe) {
+                        if #available(iOS 17.0, *) {
+                            SwipeMusicView()
+                        } else {
+                            Text("刷歌需要 iOS 17 或以上版本")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 page(.search) { tabStack(.search) { SearchView(query: "").id(account.sessionRevision) } }
                 page(.library) { tabStack(.library) { LibraryView(showLogin: $showLogin) } }
             }

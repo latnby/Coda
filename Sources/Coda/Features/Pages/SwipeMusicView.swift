@@ -8,6 +8,7 @@ import SwiftUI
 /// are buffered ahead — the feed IS the player queue (so the queue
 /// prefetcher downloads the next songs), artwork is pre-warmed, and the
 /// next batch loads before the end is reached.
+@available(iOS 17.0, macOS 15.0, *)
 struct SwipeMusicView: View {
     @EnvironmentObject private var player: PlayerService
     @EnvironmentObject private var account: AccountStore
@@ -81,7 +82,7 @@ struct SwipeMusicView: View {
         if idx >= model.tracks.count - 3 {
             Task {
                 let added = await model.loadMore()
-                if !added.isEmpty { player.queue.append(contentsOf: added) }
+                if !added.isEmpty { player.extendQueue(with: added) }
             }
         }
     }
@@ -202,6 +203,7 @@ struct SwipeMusicView: View {
 
 /// One full-screen song page: blurred cover backdrop, the cover itself,
 /// title/artist, a like button and — for the playing page — progress.
+@available(iOS 17.0, macOS 15.0, *)
 private struct SwipePage: View {
     let track: Track
     let isCurrent: Bool

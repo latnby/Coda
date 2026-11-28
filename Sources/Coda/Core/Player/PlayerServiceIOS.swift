@@ -839,6 +839,13 @@ final class PlayerService: ObservableObject {
         repeatMode = repeatMode.next
     }
 
+    /// Append tracks to the end of the queue — the swipe feed grows its
+    /// queue as more recommendations load, the same way the built-in
+    /// feed continuations extend it internally.
+    func extendQueue(with tracks: [Track]) {
+        queue.append(contentsOf: tracks)
+    }
+
     /// Jump to a track in the upcoming list (queue panel click).
     func jumpTo(_ track: Track) {
         if let nextIdx = playNextList.firstIndex(where: { $0.id == track.id }) {
