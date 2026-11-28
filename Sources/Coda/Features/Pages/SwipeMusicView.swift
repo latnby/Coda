@@ -65,7 +65,7 @@ struct SwipeMusicView: View {
 
     private func beginPlayback(from track: Track?) {
         guard let first = track ?? model.tracks.first else { return }
-        player.play(tracks: model.tracks, source: .none, startAt: first)
+        player.play(tracks: model.tracks, source: .swipeFeed, startAt: first)
         feedLive = true
         currentID = first.id
     }
@@ -79,7 +79,7 @@ struct SwipeMusicView: View {
             beginPlayback(from: track)
         }
         prewarm(around: idx)
-        if idx >= model.tracks.count - 3 {
+        if idx >= model.tracks.count - 6 {
             Task {
                 let added = await model.loadMore()
                 if !added.isEmpty { player.extendQueue(with: added) }
@@ -88,7 +88,7 @@ struct SwipeMusicView: View {
     }
 
     private func prewarm(around idx: Int) {
-        for j in max(0, idx - 1)...min(model.tracks.count - 1, idx + 2) {
+        for j in max(0, idx - 1)...min(model.tracks.count - 1, idx + 5) {
             if let url = model.tracks[j].album.picUrl?.resizedImageURL(1080) {
                 Task { _ = await ImageCache.shared.image(for: url) }
             }
