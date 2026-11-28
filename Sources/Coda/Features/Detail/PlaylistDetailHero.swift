@@ -96,8 +96,8 @@ struct PlaylistDetailHero<Actions: View>: View {
             IPadDetailHeader(artworkURL: artworkURL, title: title,
                                  subtitle: subtitle, avatarURL: avatarURL,
                                  metadataText: metadataText, circularArtwork: circularArtwork,
-                                 showsAvatar: showsAvatar, isLoading: isLoading,
-                                 artworkScale: artworkScale, actions: actions)
+                                 showsAvatar: showsAvatar, artworkScale: artworkScale,
+                                 isLoading: isLoading, actions: actions)
         } else {
             phoneHero
         }
