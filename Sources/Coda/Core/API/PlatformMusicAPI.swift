@@ -1014,15 +1014,18 @@ extension PlatformMusicAPI {
     }
     func comments(id: Int, sort: SongCommentSort, offset: Int, limit: Int) async throws -> SongCommentsPage {
         let ticket = MusicProviderContext.shared.ticket
-        let item = try song(id)
-        if provider == .qishui {
+        let item = try catalogSong(id)
+        if item.source == .qishui {
             guard let trackID = item.qishui?.trackID else { throw MusicProviderError.missingTrack }
             let page = try await QishuiMusicAPI.shared.comments(trackID: trackID, sort: sort, offset: offset, limit: limit)
             try MusicProviderContext.shared.check(ticket)
             return page
         }
+        if item.source == .netease {
+            return try await NeteaseAPI.songCommentsNative(id: item.id, sort: sort, offset: offset, limit: limit)
+        }
         let comments: [ProviderSongComment], total: Int
-        if provider == .qq {
+        if item.source == .qq {
             let page = try await QQMusicAPI.shared.comments(songID: item.id, limit: limit, pagenum: offset / max(1, limit))
             comments = page.comments; total = page.total
         } else {

@@ -4,10 +4,20 @@ extension NeteaseAPI {
     static func songComments(id: Int, sort: SongCommentSort, offset: Int = 0,
                              before: Double = 0, limit: Int = 20,
                              using client: NeteaseClient = .shared) async throws -> SongCommentsPage {
-        if MusicProviderContext.shared.current != .netease {
+        // Comments belong to the song's own platform: catalog songs
+        // (negative ids) route through the catalog's per-source dispatch,
+        // native NetEase songs through the native path — whichever
+        // platform the UI happens to be showing.
+        if id < 0 {
             return try await PlatformMusicAPI.shared.comments(id: id, sort: sort, offset: offset, limit: limit)
         }
-        try MusicProviderContext.shared.requireNetease()
+        return try await songCommentsNative(id: id, sort: sort, offset: offset, before: before, limit: limit, using: client)
+    }
+
+    /// The NetEase-native comments request; see `songComments`.
+    static func songCommentsNative(id: Int, sort: SongCommentSort, offset: Int = 0,
+                             before: Double = 0, limit: Int = 20,
+                             using client: NeteaseClient = .shared) async throws -> SongCommentsPage {
         let resource = "R_SO_4_\(id)"
         let path = sort == .hot ? "/v1/resource/hotcomments/\(resource)" : "/v1/resource/comments/\(resource)"
         let data = try await client.weapi(path, ["rid": id, "offset": offset,

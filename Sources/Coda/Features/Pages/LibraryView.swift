@@ -413,7 +413,7 @@ struct LibraryView: View {
 
     private func profileHeader(_ profile: UserProfile) -> some View {
         MusicLibraryHeaderLayout(title: profile.nickname, icon: nil, coverURL: profile.avatarUrl,
-                                 circularCover: true, usesPlaylistActions: true) {
+                                 circularCover: true, artworkScale: 0.5, usesPlaylistActions: true) {
             EmptyView()
         } metadata: {
             VStack(alignment: .leading, spacing: 6) {

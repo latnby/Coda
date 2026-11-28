@@ -1814,22 +1814,27 @@ final class PlayerService: ObservableObject {
               let current = currentTrack,
               QueuePrefetcher.permits(network: networkState, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         else { cancelQishuiPrefetch(); queuePrefetcher.update(nil); return }
-        if current.platformSong?.source == .qishui {
-            queuePrefetcher.update(nil)
-            guard let next = nextCandidates().first?.track.platformSong?.qishui?.trackID else {
-                cancelQishuiPrefetch()
-                return
-            }
+        // Qishui's perishable part is its signed stream URL, so a Qishui
+        // next track gets its playback resource warmed through the API.
+        // That is an add-on keyed on the NEXT track — not, as before, a
+        // mode keyed on the current one that switched the file prefetcher
+        // off entirely: in a mixed (aggregate) queue the songs after a
+        // Qishui track still need their audio downloaded ahead.
+        if let nextQishui = nextCandidates().first?.track.platformSong?.qishui?.trackID {
             let quality = SettingsManager.shared.preferredPlaybackQuality
-            guard qishuiPrefetch?.trackID != next || qishuiPrefetch?.quality != quality else { return }
+            if qishuiPrefetch?.trackID != nextQishui || qishuiPrefetch?.quality != quality {
+                cancelQishuiPrefetch()
+                qishuiPrefetch = (nextQishui, quality, Task {
+                    _ = try? await QishuiMusicAPI.shared.playback(trackID: nextQishui, quality: quality)
+                })
+            }
+        } else {
             cancelQishuiPrefetch()
-            qishuiPrefetch = (next, quality, Task {
-                _ = try? await QishuiMusicAPI.shared.playback(trackID: next, quality: quality)
-            })
-            return
         }
-        cancelQishuiPrefetch()
-        let candidates = nextCandidates().map(\.track)
+        // Qishui tracks themselves are not file-prefetched (the warm-up
+        // above is their preparation); every other platform's upcoming
+        // songs download ahead as usual.
+        let candidates = nextCandidates().map(\.track).filter { $0.platformSong?.source != .qishui }
         let upcoming = PrefetchLimits().window(candidates)
         guard !upcoming.isEmpty else { queuePrefetcher.update(nil); return }
         let scope = offlineAccountScope

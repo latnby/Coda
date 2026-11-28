@@ -274,6 +274,9 @@ struct MusicLibraryHeaderLayout<Eyebrow: View, Metadata: View, Actions: View>: V
     let coverURL: String?
     var description: String? = nil
     var circularCover = false
+    /// Scales the cover artwork (the profile header passes 0.5: an avatar
+    /// is not a playlist cover and must not fill the page at cover size).
+    var artworkScale: CGFloat = 1
     var isLoading = false
     var actionColumns: Int? = nil
     var usesPlaylistActions = false
@@ -302,7 +305,7 @@ struct MusicLibraryHeaderLayout<Eyebrow: View, Metadata: View, Actions: View>: V
         return availableWidth < 700
     }
     private var inset: CGFloat { Theme.Layout.contentInset }
-    private var artworkSize: CGFloat { isNarrow ? min(200, max(112, availableWidth * 0.28)) : coverSize }
+    private var artworkSize: CGFloat { (isNarrow ? min(200, max(112, availableWidth * 0.28)) : coverSize) * artworkScale }
 
     private var hasPlaylistActions: Bool { usesPlaylistActions }
 
@@ -366,8 +369,10 @@ struct MusicLibraryHeaderLayout<Eyebrow: View, Metadata: View, Actions: View>: V
             }
         } else {
             // Keep full-size controls when a narrow split window cannot fit
-            // the cover and three-button row beside each other.
-            HStack(alignment: .top, spacing: Theme.Spacing.component) {
+            // the cover and three-button row beside each other. A scaled-down
+            // cover (the profile avatar) centers against the text block
+            // instead of leaving a void beneath it.
+            HStack(alignment: artworkScale < 1 ? .center : .top, spacing: Theme.Spacing.component) {
                 artwork
                 information
             }
