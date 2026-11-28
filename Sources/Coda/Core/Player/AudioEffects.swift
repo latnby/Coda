@@ -346,7 +346,7 @@ final class AudioEffectsChain {
                 Self.setDynamics(dynamics, kDynamicsProcessorParam_ExpansionThreshold, -60)
                 Self.setDynamics(dynamics, kDynamicsProcessorParam_AttackTime, 0.01)
                 Self.setDynamics(dynamics, kDynamicsProcessorParam_ReleaseTime, 0.24)
-                Self.setDynamics(dynamics, kDynamicsProcessorParam_MasterGain, 2)
+                Self.setDynamics(dynamics, kDynamicsProcessorParam_OverallGain, 2)
             }
         }
 
