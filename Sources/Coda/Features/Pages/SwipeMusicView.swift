@@ -201,86 +201,111 @@ struct SwipeMusicView: View {
     }
 }
 
-/// One full-screen song page. The artwork IS the page — a big picture
-/// filling the whole screen, with the title and controls laid over it.
-/// Tapping the picture swaps it for the synced lyrics over the same
-/// artwork blurred into a frosted depth-of-field backdrop (the
-/// now-playing page's treatment); a cover button in the control row
-/// swaps back, so the tap never fights the lyrics' own scrolling and
-/// tap-to-seek.
+/// One full-screen song page. The layout follows the reference Lon
+/// picked from Qishui: a big rounded square (about 91% of the screen
+/// width) over a blurred-cover backdrop — NOT a full-bleed picture.
+/// Tapping the artwork switches to lyrics: the artwork itself shrinks
+/// into a small thumbnail at the top-left (the now-playing page's
+/// gesture), the synced lyrics take the body over the frosted backdrop,
+/// and tapping the thumbnail restores the big square.
 @available(iOS 17.0, macOS 15.0, *)
 private struct SwipePage: View {
     let track: Track
     let isCurrent: Bool
     @EnvironmentObject private var player: PlayerService
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showLyrics = false
 
     var body: some View {
         GeometryReader { geo in
+            let big = min(geo.size.width * 0.91, geo.size.height * 0.52)
             ZStack {
-                artworkLayer(size: geo.size)
-                legibilityGradient(size: geo.size)
-                if showLyrics && isCurrent {
-                    lyricsLayer
-                        .padding(.top, 96)
-                        .padding(.bottom, 178)
-                        .transition(.opacity)
-                }
-                bottomOverlay
-                if isCurrent && !player.isPlaying && !showLyrics {
-                    Button { player.togglePlayPause() } label: {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 62))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .shadow(radius: 12)
+                backdrop
+                VStack(alignment: .leading, spacing: 16) {
+                    headerRow(big: big)
+                    if showLyrics && isCurrent {
+                        lyricsLayer
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Spacer(minLength: 0)
+                        titleBlock
                     }
-                    .buttonStyle(.plain)
+                    controlsRow
+                    progressBar
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 104)
+                .padding(.bottom, 118)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Only the cover state uses the page tap; in lyrics state the
-            // cover button (below) is the way back.
-            if !showLyrics { withAnimation(.easeInOut(duration: 0.25)) { showLyrics = true } }
-        }
+        .animation(.easeInOut(duration: 0.32), value: showLyrics)
         .onChange(of: isCurrent) { _, current in
             if !current { showLyrics = false }
         }
     }
 
-    // MARK: - Layers
+    // MARK: - Backdrop
 
-    private func artworkLayer(size: CGSize) -> some View {
-        Group {
-            if let url = track.album.picUrl?.resizedImageURL(1080) {
+    private var backdrop: some View {
+        ZStack {
+            Platform.windowBackgroundColor
+            if let url = track.album.picUrl?.resizedImageURL(300) {
                 CachedAsyncImage(url: url)
                     .scaledToFill()
-                    .scaleEffect(showLyrics ? 1.25 : 1)
-                    .blur(radius: showLyrics ? 30 : 0)
+                    .blur(radius: 40)
+                    .opacity(colorScheme == .dark ? 0.55 : 0.4)
+            }
+            Platform.windowBackgroundColor.opacity(0.55)
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Header (artwork + compact titles in lyrics mode)
+
+    private func headerRow(big: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            artwork(size: showLyrics ? 54 : big)
+            if showLyrics {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(track.artistNames)
+                        .font(Theme.Typography.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: showLyrics ? .leading : .center)
+    }
+
+    private func artwork(size: CGFloat) -> some View {
+        Group {
+            if let url = track.album.picUrl?.resizedImageURL(1080) {
+                CachedAsyncImage(url: url).scaledToFill()
             } else {
                 Rectangle().fill(.quaternary)
                     .overlay {
                         Image(systemName: "music.note")
-                            .font(.system(size: 54, weight: .light))
+                            .font(.system(size: showLyrics ? 18 : 54, weight: .light))
                             .foregroundStyle(.tertiary)
                     }
             }
         }
-        .frame(width: size.width, height: size.height)
-        .clipped()
-        .overlay { if showLyrics { Color.black.opacity(0.22) } }
-        .animation(.easeInOut(duration: 0.3), value: showLyrics)
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: showLyrics ? 10 : 24, style: .continuous))
+        .shadow(color: .black.opacity(showLyrics ? 0.15 : 0.3), radius: showLyrics ? 8 : 24, y: showLyrics ? 3 : 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Only the playing page has live lyrics to show.
+            guard isCurrent else { return }
+            withAnimation(.easeInOut(duration: 0.32)) { showLyrics.toggle() }
+        }
     }
 
-    private func legibilityGradient(size: CGSize) -> some View {
-        LinearGradient(
-            colors: [.clear, .black.opacity(0.55)],
-            startPoint: UnitPoint(x: 0.5, y: 0.55), endPoint: .bottom
-        )
-        .frame(width: size.width, height: size.height)
-        .allowsHitTesting(false)
-    }
+    // MARK: - Lyrics
 
     @ViewBuilder
     private var lyricsLayer: some View {
@@ -299,60 +324,46 @@ private struct SwipePage: View {
     private func centeredNote(_ text: String) -> some View {
         Text(text)
             .font(Theme.Typography.secondary)
-            .foregroundStyle(.white.opacity(0.75))
+            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Overlay
+    // MARK: - Titles and controls
 
-    private var bottomOverlay: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            VStack(spacing: 5) {
-                Text(track.name)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .shadow(radius: 6)
-                Text(track.artistNames)
-                    .font(Theme.Typography.secondary)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .lineLimit(1)
-            }
-            HStack(spacing: 30) {
-                LikeButton(trackID: track.id, size: 25)
-                if isCurrent {
-                    Button { player.togglePlayPause() } label: {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 27))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 6)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { showLyrics.toggle() }
-                    } label: {
-                        Image(systemName: showLyrics ? "photo" : "text.quote")
-                            .font(.system(size: 23))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 6)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            progressBar
+    private var titleBlock: some View {
+        VStack(spacing: 5) {
+            Text(track.name)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            Text(track.artistNames)
+                .font(Theme.Typography.secondary)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 28)
-        .padding(.bottom, 118)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var controlsRow: some View {
+        HStack(spacing: 34) {
+            LikeButton(trackID: track.id, size: 25)
+            if isCurrent {
+                Button { player.togglePlayPause() } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 27))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var progressBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.3)).frame(height: 3)
+                Capsule().fill(.quaternary).frame(height: 3)
                 if isCurrent && player.duration > 0 {
-                    Capsule().fill(.white)
+                    Capsule().fill(.primary)
                         .frame(width: geo.size.width * min(1, max(0, player.progress / player.duration)), height: 3)
                 }
             }
