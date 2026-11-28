@@ -947,6 +947,7 @@ public struct IOSMainWindow: View {
                         .preferredColorScheme(settings.appearance.colorScheme)
                         .environment(\.openLogin, { showLogin = true })
                         .environment(\.openDestination, openDestination)
+                        .environment(\.activeIOSTab, selectedTab)
                         // iPadOS 16 does not keep scenePhase current inside a
                         // UIKit-presented host; pass the window's own phase.
                         .environment(\.scenePhase, scenePhase)
@@ -1022,7 +1023,6 @@ public struct IOSMainWindow: View {
                 .environmentObject(account)
                 .environmentObject(settings)
         }
-        .environment(\.activeIOSTab, selectedTab)
         .modifier(NowPlayingLoginPresenter())
         // The cover sits above the root overlay, so it shows toasts itself.
         .modifier(ToastOverlay())
