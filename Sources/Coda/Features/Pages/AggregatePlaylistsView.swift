@@ -93,10 +93,13 @@ struct AggregatePlaylistDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var filter = ""
     @State private var searchFocused = false
-    @State private var sortOrder: PlaylistTrackSort = .addedNewestFirst
+    // Default = the stored (manual) order, so drag reordering in
+    // 「调整顺序」 is what the page shows; other sorts are views on top.
+    @State private var sortOrder: PlaylistTrackSort = .addedOldestFirst
     @State private var showRename = false
     @State private var renameText = ""
     @State private var showDeleteConfirm = false
+    @State private var showReorder = false
 
     private var playlist: AggregatePlaylist? { store.playlist(id: playlistID) }
 
@@ -134,6 +137,9 @@ struct AggregatePlaylistDetailView: View {
                 dismiss()
             }
             Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: $showReorder) {
+            AggregateReorderSheet(playlistID: playlistID)
         }
     }
 
@@ -190,6 +196,11 @@ struct AggregatePlaylistDetailView: View {
                 ForEach(PlaylistTrackSort.allCases, id: \.self) { sort in
                     Text(sort.rawValue).tag(sort)
                 }
+            }
+            Button {
+                showReorder = true
+            } label: {
+                Label("调整顺序", systemImage: "arrow.up.arrow.down")
             }
             Divider()
             Button {
@@ -396,5 +407,70 @@ struct AggregateImportSheet: View {
         store.importPlaylist(name: summary.name, tracks: tracks)
         ToastCenter.shared.show("已导入「\(summary.name)」，共 \(tracks.count) 首")
         dismiss()
+    }
+}
+
+// MARK: - Reorder sheet
+
+/// Long-press drag reordering for an aggregate playlist, in the
+/// playlist's stored order. The cover needs no upkeep here: it is
+/// computed from whichever track sits first.
+struct AggregateReorderSheet: View {
+    let playlistID: UUID
+
+    @ObservedObject private var store = AggregatePlaylistStore.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var editMode: EditMode = .active
+
+    private var playlist: AggregatePlaylist? { store.playlist(id: playlistID) }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let playlist {
+                    List {
+                        ForEach(playlist.tracks) { track in
+                            HStack(spacing: 12) {
+                                if let url = track.album.picUrl?.resizedImageURL(100) {
+                                    CachedAsyncImage(url: url)
+                                        .scaledToFill()
+                                        .frame(width: 44, height: 44)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                } else {
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(.quaternary)
+                                        .frame(width: 44, height: 44)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.name)
+                                        .lineLimit(1)
+                                    Text(track.artistNames)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(track.aggregateSourceName)
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .onMove { store.moveTracks(in: playlistID, from: $0, to: $1) }
+                    }
+                    .listStyle(.plain)
+                } else {
+                    Text("歌单已删除")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("调整顺序")
+            .navigationBarTitleDisplayMode(.inline)
+            .environment(\.editMode, $editMode)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
     }
 }

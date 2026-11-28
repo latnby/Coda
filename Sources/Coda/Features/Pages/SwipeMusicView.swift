@@ -14,9 +14,13 @@ struct SwipeMusicView: View {
     @EnvironmentObject private var account: AccountStore
     @Environment(\.openLogin) private var openLogin
     @Environment(\.activeIOSTab) private var activeTab
-    @StateObject private var model = SwipeFeedModel()
+    @ObservedObject private var model = SwipeFeedModel.shared
     @State private var currentID: Int?
-    @State private var feedLive = false
+
+    /// The feed is live exactly when the player's queue is the feed's.
+    /// The play source is the single source of truth: anything else the
+    /// user plays, anywhere, turns the feed back into a silent browser.
+    private var feedLive: Bool { player.source == .swipeFeed }
 
     private var feedKey: String { "\(account.provider.rawValue)-\(account.hasAuthCookie)" }
 
@@ -33,15 +37,18 @@ struct SwipeMusicView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: feedKey) {
-            feedLive = false
-            await model.start(provider: account.provider)
+            await model.start(provider: account.provider, scope: feedKey)
+            if !model.tracks.contains(where: { $0.id == currentID }) {
+                currentID = model.currentTrackID ?? model.tracks.first?.id
+            }
             activateIfVisible()
         }
         .onChange(of: activeTab) { _, _ in activateIfVisible() }
         .onChange(of: currentID) { _, id in handlePageChange(id) }
         .onChange(of: player.currentTrack?.id) { _, id in
-            // The song ended and the player advanced on its own: follow it.
-            if let id, id != currentID, model.tracks.contains(where: { $0.id == id }) {
+            // The song ended and the player advanced on its own: follow
+            // it — but only while the feed owns playback.
+            if feedLive, let id, id != currentID, model.tracks.contains(where: { $0.id == id }) {
                 currentID = id
             }
         }
@@ -52,37 +59,48 @@ struct SwipeMusicView: View {
     /// Playback starts only when the tab is actually on screen: in the
     /// legacy tab layout every page exists from launch (behind opacity),
     /// and merely opening the app must not hijack whatever is playing.
+    /// Playback ownership, per Lon's rules: entering the feed NEVER
+    /// hijacks music that is already loaded — the feed is a browser
+    /// until he taps play on one of its songs. The one exception: when
+    /// nothing is loaded at all, entering the feed starts it. And while
+    /// the feed owns playback, leaving and returning changes nothing.
     private func activateIfVisible() {
         guard activeTab == .swipe, account.hasAuthCookie, !model.tracks.isEmpty else { return }
-        if feedLive, model.tracks.contains(where: { $0.id == player.queue.first?.id }) {
+        if feedLive {
             if let id = player.currentTrack?.id, model.tracks.contains(where: { $0.id == id }) {
                 currentID = id
             }
             return
         }
-        beginPlayback(from: nil)
+        guard player.currentTrack == nil else { return }
+        beginPlayback(from: model.tracks.first(where: { $0.id == model.currentTrackID }) ?? model.tracks.first)
     }
 
     private func beginPlayback(from track: Track?) {
         guard let first = track ?? model.tracks.first else { return }
         player.play(tracks: model.tracks, source: .swipeFeed, startAt: first)
-        feedLive = true
+        model.currentTrackID = first.id
         currentID = first.id
     }
 
     private func handlePageChange(_ id: Int?) {
         guard let id, let idx = model.tracks.firstIndex(where: { $0.id == id }) else { return }
+        model.currentTrackID = id
         let track = model.tracks[idx]
-        if player.queue.contains(where: { $0.id == id }) {
-            if player.currentTrack?.id != id { player.jumpTo(track) }
-        } else if feedLive {
-            beginPlayback(from: track)
+        // Swiping only changes the music while the feed owns playback;
+        // otherwise it is silent browsing.
+        if feedLive {
+            if player.queue.contains(where: { $0.id == id }) {
+                if player.currentTrack?.id != id { player.jumpTo(track) }
+            } else {
+                beginPlayback(from: track)
+            }
         }
         prewarm(around: idx)
         if idx >= model.tracks.count - 6 {
             Task {
                 let added = await model.loadMore()
-                if !added.isEmpty { player.extendQueue(with: added) }
+                if feedLive, !added.isEmpty { player.extendQueue(with: added) }
             }
         }
     }
@@ -113,8 +131,7 @@ struct SwipeMusicView: View {
                     .multilineTextAlignment(.center)
                 Button("重试") {
                     Task {
-                        feedLive = false
-                        await model.start(provider: account.provider)
+                        await model.start(provider: account.provider, scope: feedKey)
                         activateIfVisible()
                     }
                 }
@@ -136,7 +153,9 @@ struct SwipeMusicView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 0) {
                 ForEach(model.tracks) { track in
-                    SwipePage(track: track, isCurrent: track.id == currentID)
+                    SwipePage(track: track, isCurrent: track.id == currentID,
+                              isPlayingThisFeed: feedLive,
+                              onPlayRequest: { beginPlayback(from: track) })
                         .containerRelativeFrame(.vertical)
                         .id(track.id)
                 }
@@ -155,9 +174,13 @@ struct SwipeMusicView: View {
                     let selected = model.selectedCategoryID == category.id
                     Button {
                         Task {
+                            let wasLive = feedLive
                             await model.select(category.id)
-                            feedLive = false
-                            activateIfVisible()
+                            if wasLive {
+                                beginPlayback(from: nil)
+                            } else {
+                                activateIfVisible()
+                            }
                         }
                     } label: {
                         Text(category.title)
@@ -203,38 +226,46 @@ struct SwipeMusicView: View {
 
 /// One full-screen song page. The layout follows the reference Lon
 /// picked from Qishui: a big rounded square (about 91% of the screen
-/// width) over a blurred-cover backdrop — NOT a full-bleed picture.
-/// Tapping the artwork switches to lyrics: the artwork itself shrinks
-/// into a small thumbnail at the top-left (the now-playing page's
-/// gesture), the synced lyrics take the body over the frosted backdrop,
+/// width) over a blurred-cover backdrop, sitting clear of the category
+/// bar, with the title, artist and controls directly beneath it.
+/// Tapping the artwork switches to lyrics: the artwork shrinks into a
+/// small thumbnail at the top-left, the synced lyrics play inside the
+/// square's own box (feed-sized type that wraps — never off-screen),
 /// and tapping the thumbnail restores the big square.
 @available(iOS 17.0, macOS 15.0, *)
 private struct SwipePage: View {
     let track: Track
     let isCurrent: Bool
+    let isPlayingThisFeed: Bool
+    let onPlayRequest: () -> Void
     @EnvironmentObject private var player: PlayerService
     @Environment(\.colorScheme) private var colorScheme
     @State private var showLyrics = false
+    @State private var aggregateAddTrack: Track?
 
     var body: some View {
         GeometryReader { geo in
-            let big = min(geo.size.width * 0.91, geo.size.height * 0.52)
+            let big = min(geo.size.width * 0.91, geo.size.height * 0.46)
             ZStack {
                 backdrop
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .center, spacing: 0) {
                     headerRow(big: big)
                     if showLyrics && isCurrent {
-                        lyricsLayer
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        lyricsBox
+                            .frame(width: big, height: big)
+                            .padding(.top, 16)
                     } else {
-                        Spacer(minLength: 0)
                         titleBlock
+                            .padding(.top, 18)
                     }
                     controlsRow
+                        .padding(.top, 16)
                     progressBar
+                        .padding(.top, 14)
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 104)
+                .padding(.top, geo.size.height * 0.15)
                 .padding(.bottom, 118)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -242,6 +273,9 @@ private struct SwipePage: View {
         .animation(.easeInOut(duration: 0.32), value: showLyrics)
         .onChange(of: isCurrent) { _, current in
             if !current { showLyrics = false }
+        }
+        .sheet(item: $aggregateAddTrack) { selected in
+            AggregateAddSheet(track: selected)
         }
     }
 
@@ -308,10 +342,9 @@ private struct SwipePage: View {
     // MARK: - Lyrics
 
     @ViewBuilder
-    private var lyricsLayer: some View {
+    private var lyricsBox: some View {
         if let lyrics = player.lyrics, !lyrics.isEmpty {
-            AppleMusicLyricsColumn(lyrics: lyrics)
-                .id(player.currentTrack?.id)
+            FeedLyricsView(lyrics: lyrics, cursor: player.lyricsCursor)
         } else if player.lyrics?.isInstrumental == true {
             centeredNote("纯音乐，请欣赏")
         } else if player.lyrics != nil {
@@ -347,15 +380,33 @@ private struct SwipePage: View {
     private var controlsRow: some View {
         HStack(spacing: 34) {
             LikeButton(trackID: track.id, size: 25)
-            if isCurrent {
-                Button { player.togglePlayPause() } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 27))
-                }
-                .buttonStyle(.plain)
+            Button { playAction() } label: {
+                Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 27))
             }
+            .buttonStyle(.plain)
+            Button { aggregateAddTrack = track } label: {
+                Image(systemName: "text.badge.plus")
+                    .font(.system(size: 24))
+            }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// The play button: while the feed owns playback it pauses/resumes
+    /// or jumps within the feed queue; while anything else owns it, it
+    /// is the explicit tap that hands playback to this feed song.
+    private func playAction() {
+        if isPlayingThisFeed && player.queue.contains(where: { $0.id == track.id }) {
+            if isCurrent {
+                player.togglePlayPause()
+            } else {
+                player.jumpTo(track)
+            }
+        } else {
+            onPlayRequest()
+        }
     }
 
     private var progressBar: some View {
@@ -369,6 +420,65 @@ private struct SwipePage: View {
             }
         }
         .frame(height: 3)
+    }
+}
+
+/// Synced lyrics sized for the feed: type that wraps to the box width
+/// (never off-screen), the active line bold, auto-scrolling with the
+/// song. The now-playing page's lyrics column is tuned for its own
+/// full-screen layout and overflows this box, so the feed has its own.
+@available(iOS 17.0, macOS 15.0, *)
+private struct FeedLyricsView: View {
+    let lyrics: ParsedLyrics
+    @ObservedObject var cursor: LyricsCursor
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 15) {
+                    ForEach(lyrics.lines) { line in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(line.text.isEmpty ? "· · ·" : line.text)
+                                .font(isActive(line) ? .system(size: 19, weight: .bold) : .system(size: 17))
+                                .foregroundStyle(isActive(line) ? Color.primary : Color.secondary)
+                            if let translation = line.translation, !translation.isEmpty {
+                                Text(translation)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .id(line.id)
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+            .mask(
+                LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.07),
+                    .init(color: .black, location: 0.93),
+                    .init(color: .clear, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+            )
+            .onAppear { scrollToActive(proxy, animated: false) }
+            .onChange(of: cursor.activeIndex) { _, _ in scrollToActive(proxy, animated: true) }
+        }
+    }
+
+    private func isActive(_ line: LyricLine) -> Bool {
+        guard let idx = cursor.activeIndex, lyrics.lines.indices.contains(idx) else { return false }
+        return lyrics.lines[idx].id == line.id
+    }
+
+    private func scrollToActive(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let idx = cursor.activeIndex, lyrics.lines.indices.contains(idx) else { return }
+        let id = lyrics.lines[idx].id
+        if animated {
+            withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(id, anchor: .center) }
+        } else {
+            proxy.scrollTo(id, anchor: .center)
+        }
     }
 }
 
@@ -387,6 +497,12 @@ private final class SwipeFeedModel: ObservableObject {
     @Published private(set) var tracks: [Track] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    /// The page the feed was last on. The model is shared, so this
+    /// survives the page view being recreated on tab switches.
+    @Published var currentTrackID: Int?
+
+    static let shared = SwipeFeedModel()
+    private var loadedScope: String?
 
     private var provider: MusicProvider = .netease
     private var generation = 0
@@ -396,8 +512,13 @@ private final class SwipeFeedModel: ObservableObject {
     private var qishuiScenes: [QishuiListeningScene] = QishuiListeningScene.preferences
     private var qishuiState: QishuiFeedState?
 
-    func start(provider: MusicProvider) async {
+    func start(provider: MusicProvider, scope: String) async {
+        // Already loaded for this account scope: a tab switch recreates
+        // the view, not the feed — keep the songs and the position.
+        if loadedScope == scope, !tracks.isEmpty { return }
+        loadedScope = scope
         self.provider = provider
+        currentTrackID = nil
         generation += 1
         let gen = generation
         tracks = []
@@ -420,6 +541,7 @@ private final class SwipeFeedModel: ObservableObject {
         let gen = generation
         selectedCategoryID = categoryID
         tracks = []
+        currentTrackID = nil
         errorMessage = nil
         hasMore = true
         dailyRefreshed = false
