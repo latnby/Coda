@@ -272,7 +272,7 @@ private struct SwipePage: View {
                         .font(.headline)
                         .lineLimit(1)
                     Text(track.artistNames)
-                        .font(Theme.Typography.footnote)
+                        .font(Theme.Typography.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
