@@ -193,6 +193,19 @@ final class PlatformMusicAPI {
         guard let song = catalog.songs[id], source(song.source) == provider else { throw MusicProviderError.missingTrack }
         return song
     }
+
+    /// Playback's catalog lookup. `song(_:)` also insists the entry belong
+    /// to the provider the UI is currently showing — a sound guard for
+    /// lists and pages, but playback resolves every track through its OWN
+    /// platform while the UI stays wherever the listener left it, so the
+    /// resolver, the quality probe and the prefetcher look entries up
+    /// here instead: existence only, no current-provider gate. Callers
+    /// dispatch on the entry's own `source`, so a song still can only
+    /// ever resolve through its own platform's API.
+    func catalogSong(_ id: Int) throws -> ProviderSong {
+        guard let song = catalog.songs[id] else { throw MusicProviderError.missingTrack }
+        return song
+    }
     func tracks(_ songs: [ProviderSong]) throws -> [Track] { try songs.map(register) }
     func playlist(_ item: ProviderPlaylist, owned: Bool = false, liked: Bool = false, chart: Bool = false) throws -> PlaylistSummary {
         let kind = item.qishui?.radio != nil || item.isQQRadio == true ? "radio" : (chart ? "chart" : "playlist")
@@ -729,7 +742,7 @@ final class PlatformMusicAPI {
         return .init(artist: summary, hotSongs: try tracks(songs))
     }
     func songAudioQualityOptions(id: Int) async throws -> [AudioQualityOption] {
-        let item = try song(id)
+        let item = try catalogSong(id)
         if item.kugouCloud != nil { return [] }
         let ticket = MusicProviderContext.shared.ticket
         if item.source == .qishui, let trackID = item.qishui?.trackID {
@@ -764,7 +777,7 @@ final class PlatformMusicAPI {
     }
 
     func songAudioQualities(id: Int) async throws -> [AudioQuality] {
-        let item = try song(id)
+        let item = try catalogSong(id)
         guard item.source == .kugou, item.kugouCloud == nil else { return [] }
         let ticket = MusicProviderContext.shared.ticket
         let metadata = await KugouMusicAPI.shared.playbackMetadata(for: item)
@@ -779,7 +792,7 @@ final class PlatformMusicAPI {
         var result: [SongURLData] = []
         let quality = ProviderAudioQuality(rawValue: level) ?? .hires
         for id in ids {
-            let item = try song(id)
+            let item = try catalogSong(id)
             let url: String?
             var actualLevel: String?
             if item.source == .qishui {

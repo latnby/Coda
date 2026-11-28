@@ -15,7 +15,7 @@ jobs:
 
       - name: Build unsigned iOS IPA
         run: |
-          VERSION="0.2.6"
+          VERSION="0.2.7"
           BUILD_NUMBER="$(git rev-list --count HEAD)"
           xcodebuild -workspace ios/CodaIOS.xcworkspace -scheme CodaIOS \
             -configuration Release -destination 'generic/platform=iOS' \
