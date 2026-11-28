@@ -266,10 +266,11 @@ private struct SwipePage: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Start the content a clear gap below the category bar's
+            // Start the whole content block (artwork, titles, controls,
+            // progress) a clear air gap below the category bar's
             // measured bottom edge, and cap the square by the height
             // actually left under it, so nothing is pushed off-screen.
-            let topPad = max(0, topInset - geo.frame(in: .global).minY) + 14
+            let topPad = max(0, topInset - geo.frame(in: .global).minY) + 40
             let big = max(100, min(geo.size.width * 0.91, geo.size.height - topPad - 270))
             ZStack {
                 backdrop
@@ -468,11 +469,12 @@ private struct FeedLyricsView: View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 15) {
-                    ForEach(lyrics.lines) { line in
+                    ForEach(Array(lyrics.lines.enumerated()), id: \.element.id) { idx, line in
+                        let d = distance(fromActive: idx)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(line.text.isEmpty ? "· · ·" : line.text)
-                                .font(isActive(line) ? .system(size: 19, weight: .bold) : .system(size: 17))
-                                .foregroundStyle(isActive(line) ? Color.primary : Color.secondary)
+                                .font(d == 0 ? .system(size: 19, weight: .bold) : .system(size: 17))
+                                .foregroundStyle(d == 0 ? Color.primary : Color.secondary)
                             if let translation = line.translation, !translation.isEmpty {
                                 Text(translation)
                                     .font(.system(size: 13))
@@ -480,10 +482,18 @@ private struct FeedLyricsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // Depth of field, like the now-playing page: the
+                        // further a line sits from the sung one, the more
+                        // it blurs and fades; the sung line itself pops
+                        // slightly. All of it springs when the line turns.
+                        .blur(radius: d == 0 ? 0 : min(CGFloat(d) * 0.55, 2.2))
+                        .opacity(d == 0 ? 1 : max(0.35, 0.9 - 0.16 * Double(d)))
+                        .scaleEffect(d == 0 ? 1.03 : 1, anchor: .leading)
                         .id(line.id)
                     }
                 }
                 .padding(.vertical, 12)
+                .animation(.spring(response: 0.5, dampingFraction: 0.72), value: cursor.activeIndex)
             }
             .mask(
                 LinearGradient(stops: [
@@ -498,16 +508,18 @@ private struct FeedLyricsView: View {
         }
     }
 
-    private func isActive(_ line: LyricLine) -> Bool {
-        guard let idx = cursor.activeIndex, lyrics.lines.indices.contains(idx) else { return false }
-        return lyrics.lines[idx].id == line.id
+    /// Lines between this line and the one being sung (99 = unknown,
+    /// treated as far away). Drives the depth-of-field blur and fade.
+    private func distance(fromActive idx: Int) -> Int {
+        guard let active = cursor.activeIndex, lyrics.lines.indices.contains(active) else { return 99 }
+        return abs(idx - active)
     }
 
     private func scrollToActive(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let idx = cursor.activeIndex, lyrics.lines.indices.contains(idx) else { return }
         let id = lyrics.lines[idx].id
         if animated {
-            withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(id, anchor: .center) }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.78)) { proxy.scrollTo(id, anchor: .center) }
         } else {
             proxy.scrollTo(id, anchor: .center)
         }
