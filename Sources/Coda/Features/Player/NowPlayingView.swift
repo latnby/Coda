@@ -1491,6 +1491,7 @@ struct NowPlayingTrackMoreMenu: View {
     var onOpenDestination: ((Destination) -> Void)? = nil
     @EnvironmentObject private var account: AccountStore
     @State private var showAggregateAdd = false
+    @State private var showAudioEffects = false
 
     #if os(macOS)
     @EnvironmentObject private var settings: SettingsManager
@@ -1550,6 +1551,9 @@ struct NowPlayingTrackMoreMenu: View {
         .sheet(isPresented: $showAggregateAdd) {
             AggregateAddSheet(track: track)
         }
+        .sheet(isPresented: $showAudioEffects) {
+            AudioEffectsPanel()
+        }
         #endif
     }
 
@@ -1598,6 +1602,11 @@ struct NowPlayingTrackMoreMenu: View {
             }
         } label: { Label("前往歌手", systemImage: "music.mic") }
         Button {
+            showAudioEffects = true
+        } label: {
+            Label("音效", systemImage: "waveform.path.ecg")
+        }
+        Button {
             showAggregateAdd = true
         } label: {
             Label("添加到聚合歌单", systemImage: "text.badge.plus")
@@ -1638,6 +1647,11 @@ struct NowPlayingTrackMoreMenu: View {
         }
 
         Divider()
+        Button {
+            showAudioEffects = true
+        } label: {
+            Label("音效", systemImage: "waveform.path.ecg")
+        }
         Button {
             showAggregateAdd = true
         } label: {

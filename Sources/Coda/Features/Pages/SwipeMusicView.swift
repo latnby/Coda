@@ -263,6 +263,7 @@ private struct SwipePage: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var showLyrics = false
     @State private var aggregateAddTrack: Track?
+    @State private var dragFraction: Double?
 
     var body: some View {
         GeometryReader { geo in
@@ -377,7 +378,9 @@ private struct SwipePage: View {
     @ViewBuilder
     private var lyricsBox: some View {
         if let lyrics = player.lyrics, !lyrics.isEmpty {
-            FeedLyricsView(lyrics: lyrics, cursor: player.lyricsCursor)
+            FeedLyricsView(lyrics: lyrics, cursor: player.lyricsCursor) { line in
+                player.seek(to: line.time - player.lyricsTimeOffset)
+            }
         } else if player.lyrics?.isInstrumental == true {
             centeredNote("纯音乐，请欣赏")
         } else if player.lyrics != nil {
@@ -442,17 +445,37 @@ private struct SwipePage: View {
         }
     }
 
+    /// 进度条：当前页可拖（0.4.0）。拖动时条跟着手指走，松手才跳过去；
+    /// 横向为主的手势才接管，竖向滑动仍然翻页。非当前页只是展示。
     private var progressBar: some View {
         GeometryReader { geo in
+            let live = isCurrent && player.duration > 0
+            let fraction = dragFraction ?? (live ? min(1, max(0, player.progress / player.duration)) : 0)
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary).frame(height: 3)
-                if isCurrent && player.duration > 0 {
+                if fraction > 0 {
                     Capsule().fill(.primary)
-                        .frame(width: geo.size.width * min(1, max(0, player.progress / player.duration)), height: 3)
+                        .frame(width: geo.size.width * CGFloat(fraction), height: 3)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard live else { return }
+                        guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                        dragFraction = min(1, max(0, Double(value.location.x / geo.size.width)))
+                    }
+                    .onEnded { _ in
+                        let target = dragFraction
+                        dragFraction = nil
+                        guard live, let target else { return }
+                        player.seek(to: target * player.duration)
+                    }
+            )
         }
-        .frame(height: 3)
+        .frame(height: 18)
     }
 }
 
@@ -464,6 +487,8 @@ private struct SwipePage: View {
 private struct FeedLyricsView: View {
     let lyrics: ParsedLyrics
     @ObservedObject var cursor: LyricsCursor
+    /// 点哪句从哪句唱（0.4.0），与播放页歌词点播同一公式（含歌词偏移）。
+    var onSeek: ((LyricLine) -> Void)? = nil
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -482,6 +507,8 @@ private struct FeedLyricsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSeek?(line) }
                         // Depth of field, like the now-playing page: the
                         // further a line sits from the sung one, the more
                         // it blurs and fades; the sung line itself pops

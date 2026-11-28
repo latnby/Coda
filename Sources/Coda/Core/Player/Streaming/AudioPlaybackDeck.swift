@@ -18,6 +18,7 @@ final class AudioPlaybackDeck: NSObject, @preconcurrency AudioPlayerDelegate {
     private(set) var error: Error?
     private(set) var channelCount: AVAudioChannelCount = 2
     private var player: AudioPlayer?
+    private var effectsChain: AudioEffectsChain?
     private var loadContinuation: CheckedContinuation<Bool, Never>?
     private var source: URL?
     private var finishedPosition: TimeInterval?
@@ -90,6 +91,11 @@ final class AudioPlaybackDeck: NSObject, @preconcurrency AudioPlayerDelegate {
                 secondsRequiredToStartPlaying: 0.3, gracePeriodAfterSeekInSeconds: 0.1),
             outputFormat: format, httpDataSink: httpDataSink)
         self.player = player
+        // 音效链（0.4.0）：挂在库自带的 attach 扩展点上，位于变速节点之后、
+        // 主混音之前；参数取设置存储的当前快照，后续变化由 applyEffects 推送。
+        let chain = AudioEffectsChain(parameters: AudioEffectsStore.shared.parameters)
+        effectsChain = chain
+        player.attach(nodes: chain.nodes)
         channelCount = format?.channelCount ?? 2
         player.volume = 0
         player.delegate = self
@@ -150,6 +156,7 @@ final class AudioPlaybackDeck: NSObject, @preconcurrency AudioPlayerDelegate {
         player?.delegate = nil
         player?.stop()
         player = nil
+        effectsChain = nil
         initialSeek = nil
         isSeeking = false
         wantsPlayback = false
@@ -158,6 +165,12 @@ final class AudioPlaybackDeck: NSObject, @preconcurrency AudioPlayerDelegate {
         loadContinuation?.resume(returning: false)
         loadContinuation = nil
         transition(to: .idle)
+    }
+
+    /// 音效面板改动参数时，把最新快照推给当前这首歌的链（无链时忽略，
+    /// 下一首 load 时会取到最新快照）。
+    func applyEffects(_ parameters: AudioEffectsParameters) {
+        effectsChain?.apply(parameters)
     }
 
     private func transition(to newState: AudioPlaybackState) {

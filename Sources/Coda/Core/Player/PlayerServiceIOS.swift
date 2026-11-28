@@ -287,6 +287,7 @@ final class PlayerService: ObservableObject {
     private let feedPrefetcher = QueuePrefetcher(limits: PrefetchLimits(tracks: 6, seconds: 60 * 60, bytes: 300_000_000))
     private var qishuiExtraWarms: [Task<Void, Never>] = []
     private var prefetchObservations: Set<AnyCancellable> = []
+    private var audioEffectsObservation: AnyCancellable?
     private var prefetchUpdateScheduled = false
 
     private enum ResolvedURLLoadResult {
@@ -303,6 +304,14 @@ final class PlayerService: ObservableObject {
         volume = UIDevice.current.userInterfaceIdiom == .pad
             ? 1 : (UserDefaults.standard.object(forKey: "player.volume") as? Float ?? 0.8)
         engine.volume = volume
+        // 音效参数变化（面板里开关/换预设/选耳机）实时推给正在播的链。
+        audioEffectsObservation = AudioEffectsStore.shared.parametersSubject
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] parameters in
+                MainActor.assumeIsolated {
+                    self?.engine.applyEffects(parameters)
+                }
+            }
         repeatMode = UserDefaults.standard.string(forKey: "player.repeat")
             .flatMap(RepeatMode.init) ?? .off
 
